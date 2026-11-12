@@ -6,25 +6,30 @@ permissions:
   contents: read
 jobs:
   embed:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        browser: [chromium, firefox, webkit]
+        include:
+          - {browser: chromium, os: ubuntu-latest}
+          - {browser: firefox, os: ubuntu-latest}
+          - {browser: webkit, os: ubuntu-latest}
+          - {browser: webkit, os: macos-15-intel}
     env:
       KIT_E2E_BROWSER: ${{ matrix.browser }}
       KIT_E2E_WORKERS: 3
       KIT_E2E_PROJECT: js
       KIT_E2E_VARIANT: memory
+      KIT_E2E_RETRIES: 0
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/node-setup
       - run: pnpm playwright install --with-deps ${{ matrix.browser }}
       - run: pnpm run sync-all
-      - run: pnpm --filter=test-embed pw:build
+      - run: pnpm --filter=test-embed pw:build test/memory.test.js test/memory-forms.test.js --grep blank --repeat-each 3
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: kit-blank-${{ matrix.browser }}
+          name: kit-blank-${{ matrix.browser }}-${{ matrix.os }}
           path: packages/kit/test/apps/embed/test-results

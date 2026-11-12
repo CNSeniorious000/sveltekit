@@ -7,7 +7,7 @@ const origin='http://127.0.0.1:'+server.address().port;
 const results=[];
 for (const [name,engine] of Object.entries({chromium,firefox,webkit})) {
  const browser=await engine.launch({headless:true});
- for (const mode of ['initial','srcdoc-then-blank','http-then-blank','blank-fragment','srcdoc']) {
+ for (const mode of ['initial','blank-then-blank','blank-replace','srcdoc-then-blank','http-then-blank','blank-fragment','srcdoc']) {
   const page=await browser.newPage(); await page.goto(origin);
   try {
    await page.evaluate(async ({mode,origin})=>{
@@ -16,8 +16,8 @@ for (const [name,engine] of Object.entries({chromium,firefox,webkit})) {
     let p=loaded(); f.src=mode==='http-then-blank'?origin+'/empty':'about:blank';
     if(mode==='srcdoc-then-blank'||mode==='srcdoc')f.srcdoc='<body>stage</body>';
     document.body.append(f);await p;
-    if(mode==='srcdoc-then-blank'||mode==='http-then-blank'){
-     p=loaded();f.removeAttribute('srcdoc');f.src='about:blank';await p;
+    if(mode==='srcdoc-then-blank'||mode==='http-then-blank'||mode==='blank-then-blank'||mode==='blank-replace'){
+     p=loaded();f.removeAttribute('srcdoc');if(mode==='blank-replace')f.contentWindow.location.replace('about:blank');else f.src='about:blank';await p;
     }
     const s=f.contentDocument.createElement('script');
     const html='<body data-written="yes"><button id="push">Push</button><button id="back">Back</button><pre id="out"></pre></body>';
