@@ -3,6 +3,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from selenium import webdriver
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.common.exceptions import ElementNotInteractableException
 pages={}
 class Handler(BaseHTTPRequestHandler):
  def do_GET(self):
@@ -26,7 +27,7 @@ for sandbox in [False,True]:
   """,sandbox,mode,html)
   try:WebDriverWait(driver,5).until(lambda d:d.execute_script('return window.messages.length')>0)
   except Exception as e:print(json.dumps({'sandbox':sandbox,'mode':mode,'initError':str(e)}),flush=True);continue
-  driver.switch_to.frame(driver.find_element('tag name','iframe'));driver.find_element('id','operate').click();driver.switch_to.default_content()
+  driver.switch_to.frame(driver.find_element('tag name','iframe'));WebDriverWait(driver,5,ignored_exceptions=(ElementNotInteractableException,)).until(lambda d:d.find_element('id','operate').click() is None);driver.switch_to.default_content()
   WebDriverWait(driver,5).until(lambda d:d.execute_script('return window.messages.length')>1)
   driver.switch_to.frame(driver.find_element('tag name','iframe'))
   try:driver.find_element('id','reload').click()
