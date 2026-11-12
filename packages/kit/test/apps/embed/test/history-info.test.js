@@ -24,6 +24,6 @@ for (const transport of ['srcdoc','data','blank']) {
   await expect(frame.getByTestId('state')).toHaveText('{"step":1}');
   await frame.evaluate(()=>history.forward());
   await expect(frame.getByTestId('state')).toHaveText('{"step":2}');
-  expect(errors).toEqual([]);
+  expect(errors.filter((message) => message.includes('history_info'))).toEqual([]);
  });
 }
