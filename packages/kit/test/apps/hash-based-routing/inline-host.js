@@ -36,7 +36,7 @@ export function render_host(shell, url) {
 		frame.onload = null;
 		// A parent-realm document.write can copy the host's HTTP URL into the frame.
 		const script = frame.contentDocument.createElement('script');
-		script.textContent = 'document.open(); document.write(' + JSON.stringify(shell) + '); document.close();';
+		script.textContent = 'setTimeout(() => { document.open(); document.write(' + JSON.stringify(shell) + '); document.close(); }, 0);';
 		frame.contentDocument.body.append(script);
 	};
 	document.querySelector('#frame-container').append(frame);

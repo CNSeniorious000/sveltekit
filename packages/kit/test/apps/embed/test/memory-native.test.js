@@ -12,9 +12,9 @@ async function mount_native(page, head) {
 		frame.onload = () => {
 			frame.onload = null;
 			const doc = /** @type {Document} */ (frame.contentDocument);
-			// Use the same iframe-realm document.write as the application host.
+			// Match the host: a new task removes the parent entry settings.
 			const script = doc.createElement('script');
-			script.textContent = `document.open(); document.write(${JSON.stringify(html)}); document.close();`;
+			script.textContent = `setTimeout(() => { document.open(); document.write(${JSON.stringify(html)}); document.close(); }, 0);`;
 			doc.body.append(script);
 		};
 		document.body.append(frame);
@@ -143,4 +143,50 @@ test.describe('native document-written about:blank base controls', () => {
 		// cannot handle popstate in a Document the browser discarded altogether.
 		if (result.retained_document) expect(result.state).toEqual({ native: 1 });
 	});
+});
+
+// Some engines report CORS diagnostics as pageerror even when fetch is caught.
+test('native data document catches a denied fetch', async ({ page, javaScriptEnabled }) => {
+	test.skip(variant !== 'memory' || !javaScriptEnabled, 'Requires the scripted inline fixture');
+	/** @type {string[]} */
+	const errors = [];
+	page.on('pageerror', (error) => errors.push(error.message));
+	await page.goto('/app/memory?simple&base=opaque');
+	await expect(page.getByTestId('host-status')).toHaveText('ready');
+	const target = new URL('/app/native-denied-fetch', page.url()).href;
+	await page.route(target, (route) =>
+		route.fulfill({ contentType: 'application/json', body: '{}' })
+	);
+	await page.evaluate((target) => {
+		const output = document.createElement('pre');
+		output.dataset.testid = 'native-fetch-result';
+		output.textContent = 'pending';
+		document.body.append(output);
+		const iframe = document.createElement('iframe');
+		window.addEventListener('message', (event) => {
+			if (event.source === iframe.contentWindow && event.data?.type === 'native-fetch-result') {
+				output.textContent = JSON.stringify(event.data);
+			}
+		});
+		const html = `<script>
+		const unhandled = [];
+		addEventListener('unhandledrejection', event => unhandled.push(String(event.reason)));
+		fetch(${JSON.stringify(target)}).then(
+			() => setTimeout(() => parent.postMessage({ type: 'native-fetch-result', caught: false, unhandled }, '*'), 0)
+		).catch(error => setTimeout(() => parent.postMessage({ type: 'native-fetch-result', caught: true, error: String(error), unhandled }, '*'), 0));
+		<\/script>`;
+		iframe.src = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
+		document.body.append(iframe);
+	}, target);
+	await expect(page.getByTestId('native-fetch-result')).not.toHaveText('pending');
+	const result = JSON.parse(
+		/** @type {string} */ (await page.getByTestId('native-fetch-result').textContent())
+	);
+	const report = JSON.stringify({ browser: test.info().project.name, result, errors });
+	console.log('Native caught CORS fetch control:', report);
+	await test
+		.info()
+		.attach('native-caught-cors-fetch', { body: report, contentType: 'application/json' });
+	expect(result.caught).toBe(true);
+	expect(result.unhandled).toEqual([]);
 });

@@ -1,4 +1,5 @@
 import { expect } from '@playwright/test';
+import { back } from './memory-history.js';
 import { test, variant } from '../../../utils.js';
 
 /** @typedef {import('@playwright/test').Frame} Frame */
@@ -97,7 +98,7 @@ test.describe('inline enhanced forms', () => {
 					);
 					await expect(frame.getByTestId('page-url')).toContainText('/app/memory/forms/named');
 					await expect_document(frame);
-					await frame.evaluate(() => history.back());
+					if (!(await back(page, frame, transport))) return;
 					await expect(frame.getByTestId('route-id')).toHaveText('/memory/forms/default');
 				});
 			}

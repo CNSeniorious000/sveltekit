@@ -112,9 +112,9 @@ export function GET({ url }) {
 				frame.src = 'about:blank';
 				frame.onload = () => {
 					frame.onload = null;
-					// Write in the iframe realm. A parent-realm document.write can copy the host URL.
+					// Start a new task in the iframe realm. Synchronous insertion can retain the parent entry settings.
 					const script = frame.contentDocument.createElement('script');
-					script.textContent = 'document.open(); document.write(' + JSON.stringify(html) + '); document.close();';
+					script.textContent = 'setTimeout(() => { document.open(); document.write(' + JSON.stringify(html) + '); document.close(); }, 0);';
 					frame.contentDocument.body.append(script);
 				};
 			}

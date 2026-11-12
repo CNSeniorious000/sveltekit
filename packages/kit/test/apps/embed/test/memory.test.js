@@ -1,4 +1,5 @@
 import process from 'node:process';
+import { back } from './memory-history.js';
 import { expect } from '@playwright/test';
 import { test, variant } from '../../../utils.js';
 
@@ -10,15 +11,44 @@ test.describe.configure({ mode: 'parallel' });
 /**
  * @param {Page} page
  * @param {Record<string, string>} [options]
+ * @param {boolean} [allow_baseless]
  */
-async function mount(page, options = {}) {
+async function mount(page, options = {}, allow_baseless = false) {
 	await page.goto(`/app/memory?${new URLSearchParams(options)}`);
 	await expect(page.getByTestId('host-status')).toHaveText('ready');
-	await expect.poll(() => page.frame({ name: 'memory-1' }) !== null).toBe(true);
-	const frame = page.frame({ name: 'memory-1' });
-	await expect(/** @type {Frame} */ (frame).getByTestId('runtime')).toHaveText('browser');
-	await expect(/** @type {Frame} */ (frame).locator('body')).toHaveClass('started');
-	return /** @type {Frame} */ (frame);
+	const frame = await content_frame(page.getByTestId('frame-1'));
+	// The about:blank fixture writes its body in a child-realm task.
+	await expect(frame.locator('body')).not.toBeEmpty();
+	if (allow_baseless && (await frame.evaluate(() => document.baseURI)) === 'about:blank') {
+		// Native Firefox document.write can lose the fallback base. Do not invent an origin.
+		await expect(frame.locator('body')).toContainText('Internal Error');
+		expect(
+			await frame.evaluate(() => {
+				try {
+					new URL('../data.json', document.baseURI);
+					return false;
+				} catch {
+					return true;
+				}
+			})
+		).toBe(true);
+		return frame;
+	}
+	await expect(frame.getByTestId('runtime')).toHaveText('browser');
+	await expect(frame.locator('body')).toHaveClass('started');
+	return frame;
+}
+
+/** @param {import('@playwright/test').Locator} locator */
+async function content_frame(locator) {
+	const element = await locator.elementHandle();
+	if (!element) throw new Error('Missing iframe element');
+	// An opaque frame can have an empty window.name even when its element has a name.
+	await expect.poll(async () => (await element.contentFrame()) !== null).toBe(true);
+	const frame = await element.contentFrame();
+	await element.dispose();
+	if (!frame) throw new Error('Iframe detached before its content frame was available');
+	return frame;
 }
 
 /** @param {Frame} frame @param {string} id */
@@ -53,6 +83,7 @@ test.afterEach(async ({ page }, test_info) => {
 	if (test_info.status === test_info.expectedStatus || !test_info.title.includes('reload')) return;
 	const diagnostics = {
 		frames: page.frames().map((frame) => ({ name: frame.name(), url: frame.url() })),
+		native_message: await page.locator('body').getAttribute('data-native-message'),
 		documents: await page.evaluate(() =>
 			Array.from(document.querySelectorAll('iframe'), (iframe) => {
 				try {
@@ -86,29 +117,53 @@ for (const sandbox of [false, true]) {
 	}) => {
 		test.skip(!javaScriptEnabled, 'The native control uses iframe scripts');
 		await page.route('**/app/native-reload-control', (route) =>
-			route.fulfill({ contentType: 'text/html', body: '<!doctype html><body></body>' })
+			route.fulfill({
+				contentType: 'text/html',
+				body: '<!doctype html><body class="started"></body>'
+			})
 		);
 		await page.goto('/app/native-reload-control');
 		await page.evaluate((sandbox) => {
 			const iframe = document.createElement('iframe');
 			iframe.name = 'native-reload';
 			if (sandbox) iframe.setAttribute('sandbox', 'allow-scripts');
+			window.addEventListener('message', (event) => {
+				if (event.source !== iframe.contentWindow || event.data?.type !== 'native-reload') return;
+				document.body.dataset.nativeRun = event.data.run;
+				document.body.dataset.nativeMessage = JSON.stringify(event.data);
+			});
 			iframe.srcdoc =
-				'<!doctype html><body><p data-testid="counter">Count: 0</p><script>document.body.dataset.run = Math.random().toString()</' +
+				'<!doctype html><body><p data-testid="counter">Count: 0</p><script>document.body.dataset.run = Math.random().toString(); parent.postMessage({ type: "native-reload", run: document.body.dataset.run, url: location.href, origin: location.origin, counter: document.querySelector("[data-testid=counter]").textContent }, "*");</' +
 				'script>';
 			document.body.append(iframe);
 		}, sandbox);
-		await expect.poll(() => page.frame({ name: 'native-reload' })).not.toBeNull();
-		const frame = /** @type {Frame} */ (page.frame({ name: 'native-reload' }));
+		const frame = await content_frame(page.locator('iframe[name="native-reload"]'));
 		await expect(frame.getByTestId('counter')).toHaveText('Count: 0');
 		await expect(frame.locator('body')).toHaveAttribute('data-run', /.+/);
 		const run = await frame.locator('body').getAttribute('data-run');
+		await expect(page.locator('body')).toHaveAttribute(
+			'data-native-run',
+			/** @type {string} */ (run)
+		);
 		await frame.evaluate(() => {
 			/** @type {HTMLElement} */ (document.querySelector('[data-testid="counter"]')).textContent =
 				'Count: 1';
 		});
 		await expect(frame.getByTestId('counter')).toHaveText('Count: 1');
 		await frame.evaluate(() => location.reload());
+		// This observation crosses origins via postMessage, without Playwright's frame realm.
+		await expect(page.locator('body')).not.toHaveAttribute(
+			'data-native-run',
+			/** @type {string} */ (run)
+		);
+		expect(
+			JSON.parse(
+				/** @type {string} */ (await page.locator('body').getAttribute('data-native-message'))
+			)
+		).toMatchObject({
+			url: 'about:srcdoc',
+			counter: 'Count: 0'
+		});
 		await expect(frame.getByTestId('counter')).toHaveText('Count: 0');
 		await expect(frame.locator('body')).not.toHaveAttribute(
 			'data-run',
@@ -211,20 +266,22 @@ test.describe('inline routing in about/data documents', () => {
 				const host_url = page.url();
 				const link = frame.getByTestId('document-base-anchor');
 				await expect(link).toHaveAttribute('href', '#base-anchor');
-				expect(
-					await link.evaluate((anchor) => /** @type {HTMLAnchorElement} */ (anchor).href)
-				).toBe('about:blank#base-anchor');
+				// Capture the browser's own resolution before Kit handles the click.
+				// WebKit can use the inherited fallback for a fragment with an opaque base.
+				const destination = await link.evaluate(
+					(anchor) => /** @type {HTMLAnchorElement} */ (anchor).href
+				);
+				expect(new URL(destination).hash).toBe('#base-anchor');
+				const document_url = await frame.evaluate(() => location.href);
 				await link.click();
-				await expect
-					.poll(() => frame.evaluate(() => location.href))
-					.toBe('about:blank#base-anchor');
-				if (transport === 'srcdoc') {
+				await expect.poll(() => frame.evaluate(() => location.href)).toBe(destination);
+				if (destination.split('#')[0] !== document_url.split('#')[0]) {
 					// The effective base names a different document. This is a native document
 					// navigation, not a fragment of the logical route or original srcdoc.
 					await expect(frame.getByTestId('counter')).toHaveCount(0);
 				} else {
 					await expect(frame.getByTestId('counter')).toHaveText('Count: 0');
-					await expect(frame.getByTestId('page-url')).toHaveText('about:blank#base-anchor');
+					await expect(frame.getByTestId('page-url')).toHaveText(destination);
 				}
 				expect(page.url()).toBe(host_url);
 			});
@@ -420,7 +477,12 @@ test.describe('inline routing in about/data documents', () => {
 
 			for (const base of ['inherited', 'relative']) {
 				test(`hydrates using the browser's ${base} document base`, async ({ page }) => {
-					const frame = await mount(page, { transport, base });
+					const frame = await mount(page, { transport, base }, true);
+					if ((await frame.evaluate(() => document.baseURI)) === 'about:blank') {
+						expect(transport).toBe('blank');
+						expect(base).toBe('relative');
+						return;
+					}
 					await expect_route(frame, 'alpha');
 					if (base === 'inherited') {
 						expect(await frame.locator('base').count()).toBe(0);
@@ -447,7 +509,12 @@ test.describe('inline routing in about/data documents', () => {
 						blocked_requests.push(request.url());
 					}
 				});
-				const frame = await mount(page, { transport, csp: 'base-none' });
+				const frame = await mount(page, { transport, csp: 'base-none' }, true);
+				if ((await frame.evaluate(() => document.baseURI)) === 'about:blank') {
+					expect(transport).toBe('blank');
+					expect(blocked_requests).toEqual([]);
+					return;
+				}
 				await expect_route(frame, 'alpha');
 				expect(await frame.evaluate(() => document.baseURI)).toBe(page.url());
 				expect(await frame.locator('base').getAttribute('href')).toBe(
@@ -508,11 +575,11 @@ test.describe('inline routing in about/data documents', () => {
 				await expect_route(frame, 'linked');
 				await frame.getByTestId('relative-link').click();
 				await expect_route(frame, 'relative');
-				await frame.evaluate(() => history.back());
+				if (!(await back(page, frame, transport))) return;
 				await expect_route(frame, 'linked');
-				await frame.evaluate(() => history.back());
+				if (!(await back(page, frame, transport))) return;
 				await expect_route(frame, 'next');
-				await frame.evaluate(() => history.back());
+				if (!(await back(page, frame, transport))) return;
 				await expect_route(frame, 'alpha');
 				await frame.evaluate(() => history.forward());
 				await expect_route(frame, 'next');
@@ -589,7 +656,7 @@ test.describe('inline routing in about/data documents', () => {
 				await frame.getByTestId('redirect').click();
 				await expect_route(frame, 'redirected');
 				await expect_document(frame, transport);
-				await frame.evaluate(() => history.back());
+				if (!(await back(page, frame, transport))) return;
 				await expect_route(frame, 'alpha');
 			});
 
@@ -612,7 +679,7 @@ test.describe('inline routing in about/data documents', () => {
 				expect(metadata.pageUrl).toBe(original);
 				expect(new URL(metadata.url).pathname).toBe('/app/memory/route/replaced');
 				expect(await frame.evaluate(() => history.length)).toBe(length + 1);
-				await frame.evaluate(() => history.back());
+				if (!(await back(page, frame, transport))) return;
 				await expect(frame.getByTestId('state')).toHaveText('{}');
 				await expect(frame.getByTestId('shallow-url')).toHaveText('');
 				await expect_route(frame, 'alpha');
@@ -647,7 +714,7 @@ test.describe('inline routing in about/data documents', () => {
 				);
 				await expect_route(frame, 'next');
 				await expect.poll(() => frame.evaluate(() => scrollY)).toBe(0);
-				await frame.evaluate(() => history.back());
+				if (!(await back(page, frame, transport))) return;
 				await expect(frame.getByTestId('page-url')).toContainText('#anchor');
 				await expect.poll(() => frame.evaluate(() => scrollY)).toBe(position);
 				await expect_document(frame, transport);
@@ -695,12 +762,11 @@ test.describe('inline routing in about/data documents', () => {
 				await expect(second.getByTestId('state')).toHaveText('{"modal":"open"}');
 				await expect(first.getByTestId('state')).toHaveText('{}');
 				await expect_route(first, 'next');
-				await second.evaluate(() => history.back());
-				await expect(second.getByTestId('state')).toHaveText('{}');
+				const second_retained = await back(page, second, transport);
+				if (second_retained) await expect(second.getByTestId('state')).toHaveText('{}');
 				await expect_route(first, 'next');
-				await first.evaluate(() => history.back());
-				await expect_route(first, 'alpha');
-				await expect_route(second, 'alpha');
+				if (await back(page, first, transport)) await expect_route(first, 'alpha');
+				if (second_retained) await expect_route(second, 'alpha');
 				await expect_document(first, transport);
 				await expect_document(second, transport);
 			});
