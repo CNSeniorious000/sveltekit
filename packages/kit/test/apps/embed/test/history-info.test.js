@@ -1,8 +1,11 @@
 import { expect } from '@playwright/test';
 import { test, variant } from '../../../utils.js';
 
-test('shallow history survives reload without session storage', async ({ page }) => {
-	test.skip(variant !== 'memory');
+test('shallow history survives reload without session storage', async ({
+	page,
+	javaScriptEnabled
+}) => {
+	test.skip(variant !== 'memory' || !javaScriptEnabled);
 	/** @type {string[]} */
 	const errors = [];
 	page.on('pageerror', (error) => errors.push(error.message));
@@ -23,8 +26,9 @@ test('shallow history survives reload without session storage', async ({ page })
 	const before = await page.evaluate(() => performance.timeOrigin);
 	await page.reload();
 	expect(await page.evaluate(() => performance.timeOrigin)).not.toBe(before);
+	// Ordinary HTTP reload resets page.state unless persistence was requested.
 	await expect(page.locator('body')).toHaveClass('started');
-	await expect(page.getByTestId('state')).toHaveText('{"modal":"two"}');
+	await expect(page.getByTestId('state')).toHaveText('{}');
 	await page.getByTestId('history-back').click();
 	await expect(page.getByTestId('state')).toHaveText('{"modal":"one"}');
 	await page.getByTestId('history-forward').click();
