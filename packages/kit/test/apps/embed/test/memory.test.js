@@ -1,5 +1,5 @@
 import process from 'node:process';
-import { back, blank_fragment_history_delta } from './memory-history.js';
+import { back, blank_history_delta } from './memory-history.js';
 import { expect } from '@playwright/test';
 import { test, variant } from '../../../utils.js';
 
@@ -72,11 +72,16 @@ async function expect_route(frame, slug) {
 
 /** @param {Frame} frame @param {string} transport */
 async function expect_document(frame, transport) {
+	// Check the browser document itself, not Playwright's cached frame descriptor.
+	// Cross-process opaque frames can report an empty frame.url() after hydration.
+	const actual = await frame.evaluate(() => location.href);
 	const expected =
-		transport === 'data' ? frame.url() : transport === 'blank' ? 'about:blank' : 'about:srcdoc';
-	if (transport === 'data') expect(expected).toMatch(/^data:text\/html;charset=utf-8,/);
-	expect(frame.url()).toBe(expected);
-	expect(await frame.evaluate(() => location.href)).toBe(expected);
+		transport === 'data' ? actual : transport === 'blank' ? 'about:blank' : 'about:srcdoc';
+	if (transport === 'data') expect(actual).toMatch(/^data:text\/html;charset=utf-8,/);
+	if (frame.url() !== actual) {
+		console.log('Frame descriptor URL differs from document:', { descriptor: frame.url(), actual });
+	}
+	expect(actual).toBe(expected);
 }
 
 test.afterEach(async ({ page }, test_info) => {
@@ -424,7 +429,8 @@ test.describe('inline routing in about/data documents', () => {
 					const frame = await mount(page, { transport, simple: '', base: 'opaque' });
 					const href = transport === 'blank' ? 'about:blank' : 'about:srcdoc';
 					const length = await frame.evaluate(() => history.length);
-					const delta = transport === 'blank' ? await blank_fragment_history_delta(page, false) : 1;
+					const delta =
+						transport === 'blank' ? await blank_history_delta(page, 'anchor', false) : 1;
 					await frame.getByTestId('counter').click();
 					await expect(frame.getByTestId('counter')).toHaveText('Count: 1');
 					await expect(frame.getByTestId('native-anchor')).toHaveAttribute(
@@ -483,7 +489,7 @@ test.describe('inline routing in about/data documents', () => {
 					const logical = /** @type {string} */ (await frame.getByTestId('page-url').textContent());
 					expect(new URL(logical).pathname).not.toBe(new URL(document_base).pathname);
 					const length = await frame.evaluate(() => history.length);
-					const delta = transport === 'blank' ? await blank_fragment_history_delta(page, true) : 1;
+					const delta = transport === 'blank' ? await blank_history_delta(page, 'anchor', true) : 1;
 					const index = await frame.evaluate(
 						() => history.state['sveltekit:metadata'].historyIndex
 					);
@@ -789,6 +795,8 @@ test.describe('inline routing in about/data documents', () => {
 				const frame = await mount(page, { transport });
 				const original = await frame.getByTestId('page-url').textContent();
 				const length = await frame.evaluate(() => history.length);
+				const delta =
+					transport === 'blank' ? await blank_history_delta(page, 'push-state', false) : 1;
 				await frame.getByTestId('shallow-push').click();
 				await expect(frame.getByTestId('state')).toHaveText('{"modal":"open"}');
 				await expect_route(frame, 'alpha');
@@ -796,14 +804,14 @@ test.describe('inline routing in about/data documents', () => {
 				let metadata = await frame.evaluate(() => history.state['sveltekit:metadata']);
 				expect(metadata.pageUrl).toBe(original);
 				expect(new URL(metadata.url).pathname).toBe('/app/memory/route/modal');
-				expect(await frame.evaluate(() => history.length)).toBe(length + 1);
+				expect(await frame.evaluate(() => history.length)).toBe(length + delta);
 				await frame.getByTestId('shallow-replace').click();
 				await expect(frame.getByTestId('state')).toHaveText('{"modal":"replaced"}');
 				await expect(frame.getByTestId('shallow-slug')).toHaveText('replaced');
 				metadata = await frame.evaluate(() => history.state['sveltekit:metadata']);
 				expect(metadata.pageUrl).toBe(original);
 				expect(new URL(metadata.url).pathname).toBe('/app/memory/route/replaced');
-				expect(await frame.evaluate(() => history.length)).toBe(length + 1);
+				expect(await frame.evaluate(() => history.length)).toBe(length + delta);
 				if (!(await back(page, frame, transport))) return;
 				await expect(frame.getByTestId('state')).toHaveText('{}');
 				await expect(frame.getByTestId('shallow-url')).toHaveText('');

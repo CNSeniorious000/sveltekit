@@ -45,7 +45,10 @@ or reload. Browsers can discard document-written blank content during history
 traversal, including navigation among fragment entries created after startup.
 Such a frame also has no native source to reload. The blank tests therefore cover
 startup, links, `goto`, fetches, and native exits, with no back/forward or reload
-guarantee. Full history and reload tests apply only to srcdoc and data frames.
+guarantee. Full history and reload assertions are exercised only for srcdoc and data frames;
+this does not mean every engine passes them. The tested Firefox engine fails srcdoc reload
+after a native History API mutation, even without Kit. See the
+[native controls and limits](../embed/README.md#cross-browser-findings-on-this-investigation-branch).
 
 The fixture covers startup, raw fragment links, `goto`, history back/forward,
 reload, relative load fetches, native form and fetch POST, native link opt-outs, inherited base,

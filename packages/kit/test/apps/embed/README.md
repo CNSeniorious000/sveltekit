@@ -87,8 +87,9 @@ prerender results remain usable without a network base.
 
 ## Native limits and coverage
 
-- Srcdoc reload at the source path/query replays its SSR snapshot; a different retained logical
-  path/query discards stale markup and fetch/remote seeds before client rendering.
+- When the browser replays the srcdoc on reload, the source path/query replays its SSR snapshot;
+  a different retained logical path/query discards stale markup and fetch/remote seeds before
+  client rendering. This is not a guarantee that every browser can reload that document.
 - Browsers may discard document-written blank content during history traversal or reload, even
   without Kit. Blank tests cover startup, links, goto, requests and native fragment push/replace,
   not persistence of discarded HTML. The host never automatically restores it.
@@ -110,3 +111,26 @@ prerender results remain usable without a network base.
   is permitted. Use the [hash fixture's inline variant](../hash-based-routing/README.md) for
   separate srcdoc/blank/data hash routing and HTTP controls. Hash output cannot use this
   fixture's server loads, actions and host endpoints.
+
+### Cross-browser findings on this investigation branch
+
+The native controls reproduce boundaries without loading Kit in the tested document:
+
+- In the tested Firefox engine, calling `replaceState` or `pushState` in srcdoc prevents a later
+  reload from replaying the source. The untouched srcdoc reload control passes. This affects both
+  pathname and hash routing. The branch does not implement a host-side reload or persistence shim.
+- In the tested WebKit engine, a document-written about:blank frame can update history state and
+  fragments without appending a history entry. Back can consequently leave the whole host.
+  Application tests compare with an isolated native host performing the same operation, and
+  annotate document disposal or host departure explicitly. A passing comparison means native
+  behavior is preserved, not that backward navigation keeps the app alive.
+- Chromium can discard a document-written about:blank body on history traversal while retaining
+  the entry's state. Tests likewise verify this against the native control rather than recreate
+  the missing HTML.
+
+The standalone native-history and Firefox reload probes still assert the desired full behavior
+and remain red on affected engines. They are intentionally retained during investigation, not
+silently skipped or treated as a complete cross-browser pass. Ordinary HTTP WebKit comparison
+jobs separately test the unmodified upstream revision; flakes there are not proof that the patch
+improves or breaks HTTP behavior. These observations are specific to the engines run by this
+matrix, not a promise about all browser versions or WebViews.

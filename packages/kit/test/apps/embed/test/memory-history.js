@@ -152,11 +152,12 @@ export async function back(page, frame, transport) {
 	return false;
 }
 
-/** Match the same fragment operation in a document with no Kit runtime.
+/** Match the same history operation in a document with no Kit runtime.
  * @param {Page} page
+ * @param {'anchor' | 'push-state'} operation
  * @param {boolean} after_navigation
  */
-export async function blank_fragment_history_delta(page, after_navigation) {
+export async function blank_history_delta(page, operation, after_navigation) {
 	const control = await page.context().newPage();
 	try {
 		// No Kit siblings: iframe histories contribute to the same joint history.
@@ -167,24 +168,30 @@ export async function blank_fragment_history_delta(page, after_navigation) {
 			})
 		);
 		await control.goto(page.url());
-		await control.evaluate((after_navigation) => {
-			const iframe = document.createElement('iframe');
-			iframe.dataset.testid = 'fragment-control';
-			iframe.src = 'about:blank';
-			iframe.onload = () => {
-				iframe.onload = null;
-				const doc = /** @type {Document} */ (iframe.contentDocument);
-				const script = doc.createElement('script');
-				const html = `<body data-native-written=true><a id="anchor" href="about:blank#anchor">Anchor</a></body>`;
-				script.textContent = `setTimeout(() => {
+		await control.evaluate(
+			({ operation, after_navigation }) => {
+				const iframe = document.createElement('iframe');
+				iframe.dataset.testid = 'fragment-control';
+				iframe.src = 'about:blank';
+				iframe.onload = () => {
+					iframe.onload = null;
+					const doc = /** @type {Document} */ (iframe.contentDocument);
+					const script = doc.createElement('script');
+					const html = `<body data-native-written=true><a id="anchor" href="about:blank#anchor">Anchor</a></body>`;
+					script.textContent = `setTimeout(() => {
 					document.open(); document.write(${JSON.stringify(html)}); document.close();
 					history.replaceState({ native: 0 }, '');
 					if (${after_navigation}) history.pushState({ native: 1 }, '');
+					if (${JSON.stringify(operation)} === 'push-state') document.getElementById('anchor').onclick = event => {
+						event.preventDefault(); history.pushState({ native: 2 }, '', undefined);
+					};
 				}, 0);`;
-				doc.body.append(script);
-			};
-			document.body.append(iframe);
-		}, after_navigation);
+					doc.body.append(script);
+				};
+				document.body.append(iframe);
+			},
+			{ operation, after_navigation }
+		);
 		await expect(
 			control.frameLocator('[data-testid="fragment-control"]').locator('body')
 		).toHaveAttribute('data-native-written', 'true');
@@ -193,13 +200,17 @@ export async function blank_fragment_history_delta(page, after_navigation) {
 		if (!frame) throw new Error('Missing native fragment frame');
 		const before = await frame.evaluate(() => history.length);
 		await frame.locator('#anchor').click();
-		await expect.poll(() => frame.evaluate(() => location.href)).toBe('about:blank#anchor');
+		await expect
+			.poll(() => frame.evaluate(() => location.href))
+			.toBe(operation === 'anchor' ? 'about:blank#anchor' : 'about:blank');
+		if (operation === 'push-state')
+			expect(await frame.evaluate(() => history.state)).toEqual({ native: 2 });
 		const after = await frame.evaluate(() => history.length);
 		const delta = after - before;
 		expect([0, 1]).toContain(delta);
 		console.log(
-			'Native blank fragment history:',
-			JSON.stringify({ after_navigation, before, after, delta })
+			'Native blank history operation:',
+			JSON.stringify({ operation, after_navigation, before, after, delta })
 		);
 		return delta;
 	} finally {
