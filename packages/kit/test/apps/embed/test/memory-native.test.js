@@ -153,10 +153,11 @@ test('native data document catches a denied fetch', async ({ page, javaScriptEna
 	page.on('pageerror', (error) => errors.push(error.message));
 	await page.goto('/app/memory?simple&base=opaque');
 	await expect(page.getByTestId('host-status')).toHaveText('ready');
-	const target = new URL('/app/native-denied-fetch', page.url()).href;
-	await page.route(target, (route) =>
-		route.fulfill({ contentType: 'application/json', body: '{}' })
-	);
+	const target = new URL('/app/memory/native-denied-fetch', page.url()).href;
+	// A routed synthetic response can bypass the browser's real CORS enforcement.
+	const response = await page.request.get(target);
+	expect(response.status()).toBe(200);
+	expect(response.headers()['access-control-allow-origin']).toBeUndefined();
 	await page.evaluate((target) => {
 		const output = document.createElement('pre');
 		output.dataset.testid = 'native-fetch-result';

@@ -119,10 +119,10 @@ for (const sandbox of [false, true]) {
 		await page.route('**/app/native-reload-control', (route) =>
 			route.fulfill({
 				contentType: 'text/html',
-				body: '<!doctype html><body class="started"></body>'
+				body: '<!doctype html><body class="started"><p>Native reload control</p></body>'
 			})
 		);
-		await page.goto('/app/native-reload-control');
+		await page.goto('/app/native-reload-control', { wait_for_started: false });
 		await page.evaluate((sandbox) => {
 			const iframe = document.createElement('iframe');
 			iframe.name = 'native-reload';
