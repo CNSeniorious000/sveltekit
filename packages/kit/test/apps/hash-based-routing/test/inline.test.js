@@ -22,12 +22,40 @@ for (const mode of ['srcdoc', 'blank', 'data']) {
 			);
 			await expect(frame.locator('[data-document-base]')).toHaveText(`${origin}/network/embedded/`);
 			const instance = await frame.locator('[data-instance]').textContent();
+			const document_url = await frame.locator('[data-document-url]').textContent();
+			const url_probe = await frame.locator('html').evaluate(() => {
+				const parsed = new URL('#/inline/a', location.href);
+				const pathname = new URL(parsed);
+				pathname.pathname = pathname.pathname;
+				const search = new URL(parsed);
+				search.search = search.search;
+				return {
+					document: location.href,
+					parsed: parsed.href,
+					pathname: pathname.href,
+					search: search.href
+				};
+			});
+			console.log('opaque URL probe', mode, {
+				parsed_document_matches:
+					url_probe.parsed.split('#')[0] === url_probe.document.split('#')[0],
+				pathname_setter_changed: url_probe.pathname !== url_probe.parsed,
+				search_setter_changed: url_probe.search !== url_probe.parsed
+			});
+			await test.info().attach('opaque-url-parser-and-setters', {
+				body: JSON.stringify(url_probe, null, 2),
+				contentType: 'application/json'
+			});
 
 			await frame.getByRole('link', { name: 'Raw hash A', exact: true }).click();
 			await expect(frame.getByRole('heading', { name: 'Hash page A' })).toBeVisible();
+			await expect(frame.locator('[data-document-url]')).toHaveText(
+				document_url?.replace(/#.*$/, '#/inline/a') || ''
+			);
 			await frame.getByRole('button', { name: 'Hash goto B', exact: true }).click();
 			await expect(frame.getByRole('heading', { name: 'Hash page B' })).toBeVisible();
 			await expect(frame.locator('[data-instance]')).toHaveText(instance || '');
+			await expect(frame.locator('[data-document-url]')).toHaveText(document_url || '');
 		});
 
 		test('fragment history supports back and forward', async ({ page }) => {

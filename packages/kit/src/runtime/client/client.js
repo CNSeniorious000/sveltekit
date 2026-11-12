@@ -1023,9 +1023,13 @@ async function get_navigation_result_from_branch({
 		}
 	}
 
-	url.pathname = normalize_path(url.pathname, slash);
-	// eslint-disable-next-line no-self-assign
-	url.search = url.search; // turn `/?` into `/`
+	// An opaque document has no route pathname to normalize. In WebKit, writing
+	// it can turn about:srcdoc into about:/srcdoc, which history cannot commit.
+	if (url.protocol !== 'about:' && url.protocol !== 'data:') {
+		url.pathname = normalize_path(url.pathname, slash);
+		// eslint-disable-next-line no-self-assign
+		url.search = url.search; // turn `/?` into `/`
+	}
 
 	/** @type {import('./types.js').NavigationFinished} */
 	const result = {
@@ -2189,7 +2193,11 @@ async function navigate({
 	}
 
 	// ensure the url pathname matches the page's trailing slash option
-	if (navigation_result.props.page.url.pathname !== url.pathname) {
+	if (
+		url.protocol !== 'about:' &&
+		url.protocol !== 'data:' &&
+		navigation_result.props.page.url.pathname !== url.pathname
+	) {
 		url.pathname = navigation_result.props.page.url.pathname;
 	}
 

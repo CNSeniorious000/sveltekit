@@ -202,3 +202,44 @@ jobs:
           retention-days: 3
           name: test-failure-${{ github.run_id }}-${{ github.job }}-${{ strategy.job-index }}
           path: test-results.tar.gz
+
+  webkit-http-comparison:
+    # Diagnose the same three ordinary HTTP failures without changing the full suite.
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { revision: baseline, ref: '03c5f4b807a73c40424eee71e34fc2d4d099079c' }
+          - { revision: candidate }
+    env:
+      KIT_E2E_BROWSER: webkit
+      KIT_E2E_WORKERS: 3
+      KIT_E2E_PROJECT: js
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.ref || github.sha }}
+          persist-credentials: false
+      - name: Record tested revision
+        run: git rev-parse HEAD
+      - uses: ./.github/actions/node-setup
+      - run: pnpm playwright install webkit
+      - run: pnpm run sync-all
+      - name: Run the three HTTP regressions
+        working-directory: packages/kit/test/apps/basics
+        run: |
+          node test/playwright/setup.js
+          pnpm exec playwright test test/playwright/cross-platform/client.test.js --grep 'dynamically imported components lazily load CSS|preloads errors|recognizes clicks outside the app target'
+      - name: Archive comparison results
+        if: failure()
+        shell: bash
+        run: find packages -type d -name test-results -not -empty | tar -czf test-results.tar.gz --files-from=-
+      - name: Upload comparison results
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          retention-days: 3
+          name: webkit-http-${{ github.run_id }}-${{ matrix.revision }}
+          path: test-results.tar.gz
