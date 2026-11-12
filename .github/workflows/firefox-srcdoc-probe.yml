@@ -1,0 +1,17 @@
+name: Firefox srcdoc reload probe
+on:
+  push:
+    branches: [diagnose/13226-firefox-reload]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/node-setup
+      - run: pnpm playwright install --with-deps firefox
+      - run: node scripts/firefox-srcdoc-probe.mjs
