@@ -127,7 +127,7 @@ for(const sandbox of [false,true]) {
   await expect(frame.getByTestId('counter')).toHaveText('Count: 1');
   await frame.evaluate(()=>location.reload()).catch(()=>{});
   await page.waitForTimeout(1000);
-  console.log('REVOKED_BLOB', JSON.stringify({sandbox, url:frame.url(), runtime:await frame.getByTestId('runtime').count(), counter:await frame.getByTestId('counter').textContent().catch(()=>null)}));
+  console.log('REVOKED_BLOB', JSON.stringify({sandbox, url:frame.url(), runtime:await frame.getByTestId('runtime').count(), counter:await frame.getByTestId('counter').textContent({timeout:500}).catch(()=>null)}));
  });
 }
 

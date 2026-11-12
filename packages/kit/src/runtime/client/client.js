@@ -165,7 +165,7 @@ if (DEV) {
 
 /** @param {number} index */
 function capture_scroll(index) {
-	history_info[index].scroll = scroll_state();
+	(history_info[index] ??= {}).scroll = scroll_state();
 }
 
 /**
