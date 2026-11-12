@@ -210,6 +210,72 @@ for (const sandbox of [false, true]) {
 	}
 }
 
+// Exercise the actual document's script realm and native click handlers, not evaluate().
+for (const sandbox of [false, true]) {
+	for (const operation of ['none', 'replace-omitted', 'push-omitted', 'replace-self-url']) {
+		test(`native srcdoc button reload${sandbox ? ' in an opaque sandbox' : ''}: ${operation}`, async ({
+			page,
+			javaScriptEnabled
+		}) => {
+			test.skip(!javaScriptEnabled, 'The native control uses iframe scripts');
+			await page.route('**/app/native-button-reload-control', (route) =>
+				route.fulfill({
+					contentType: 'text/html',
+					body: '<!doctype html><body><p>Native button reload control</p></body>'
+				})
+			);
+			await page.goto('/app/native-button-reload-control', { wait_for_started: false });
+			await page.evaluate(
+				({ sandbox, operation }) => {
+					const iframe = document.createElement('iframe');
+					iframe.name = 'native-button-reload';
+					if (sandbox) iframe.setAttribute('sandbox', 'allow-scripts');
+					window.addEventListener('message', (event) => {
+						if (event.source !== iframe.contentWindow || event.data?.type !== 'native-reload')
+							return;
+						document.body.dataset.nativeRun = event.data.run;
+						document.body.dataset.nativeMessage = JSON.stringify(event.data);
+					});
+					iframe.srcdoc =
+						`<!doctype html><body>
+					<p data-testid="counter">Count: 0</p>
+					<button id="operate">Operate</button><button id="reload">Reload</button>
+					<script>
+					const operation = ${JSON.stringify(operation)};
+					document.body.dataset.run = Math.random().toString();
+					parent.postMessage({type:'native-reload', run:document.body.dataset.run, url:location.href, counter:document.querySelector('[data-testid=counter]').textContent}, '*');
+					document.getElementById('operate').onclick = () => {
+						if (operation === 'replace-omitted') history.replaceState({}, '');
+						if (operation === 'push-omitted') history.pushState({}, '');
+						if (operation === 'replace-self-url') history.replaceState({}, '', location.href);
+						document.querySelector('[data-testid=counter]').textContent = 'Count: 1';
+					};
+					document.getElementById('reload').onclick = () => location.reload();
+					</` + 'script>';
+					document.body.append(iframe);
+				},
+				{ sandbox, operation }
+			);
+			const frame = await content_frame(page.locator('iframe[name="native-button-reload"]'));
+			await expect(frame.getByTestId('counter')).toHaveText('Count: 0');
+			await expect(page.locator('body')).toHaveAttribute('data-native-run', /.+/);
+			const run = /** @type {string} */ (
+				await page.locator('body').getAttribute('data-native-run')
+			);
+			await frame.getByRole('button', { name: 'Operate', exact: true }).click();
+			await expect(frame.getByTestId('counter')).toHaveText('Count: 1');
+			await frame.getByRole('button', { name: 'Reload', exact: true }).click();
+			await expect(page.locator('body')).not.toHaveAttribute('data-native-run', run);
+			expect(
+				JSON.parse(
+					/** @type {string} */ (await page.locator('body').getAttribute('data-native-message'))
+				)
+			).toMatchObject({ url: 'about:srcdoc', counter: 'Count: 0' });
+			await expect(frame.getByTestId('counter')).toHaveText('Count: 0');
+		});
+	}
+}
+
 test.describe('inline routing in about/data documents', () => {
 	test.skip(variant !== 'memory', 'Requires the inline output variant');
 	test.beforeEach(({ javaScriptEnabled }) => {
@@ -1008,16 +1074,19 @@ test.describe('inline routing in about/data documents', () => {
 		await expect_route(frame, 'alpha');
 		expect(await json(frame, 'fetched')).toMatchObject({ source: 'server', version: 0 });
 		expect(data_requests).toEqual([]);
-		expect(
-			await frame.evaluate(() => {
-				try {
-					void document.cookie;
-					return null;
-				} catch (error) {
-					return error instanceof DOMException ? error.name : String(error);
-				}
-			})
-		).toBe('SecurityError');
+		// Execute the access check in page script, not Playwright's privileged evaluation realm.
+		await frame.addScriptTag({
+			content: `
+			let error = null;
+			try { void parent.document; } catch (e) { error = e.name; }
+			document.documentElement.dataset.parentAccessError = String(error);
+			parent.postMessage({ type: 'sandbox-parent-access', error }, '*');
+		`
+		});
+		await expect(frame.locator('html')).toHaveAttribute(
+			'data-parent-access-error',
+			'SecurityError'
+		);
 		await frame.getByTestId('counter').click();
 		await expect(frame.getByTestId('counter')).toHaveText('Count: 1');
 		await expect_document(frame, 'srcdoc');

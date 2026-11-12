@@ -10,15 +10,33 @@ const retained = new WeakMap();
  */
 export async function observe_history(page, frame) {
 	const host = page.url();
-	const pushes = await frame.evaluate(() => {
-		const steps = [];
-		for (const native of [0, 1, 2]) {
-			if (native === 0) history.replaceState({ native }, '');
-			else history.pushState({ native }, '');
-			steps.push({ native, length: history.length, state: history.state });
-		}
-		return steps;
+	await frame.addScriptTag({
+		content: `
+		const output = document.createElement('pre');
+		output.dataset.testid = 'native-history-steps';
+		const push = document.createElement('button');
+		push.dataset.testid = 'native-history-push';
+		push.textContent = 'Native push';
+		push.onclick = () => {
+			const steps = [];
+			for (const native of [0, 1, 2]) {
+				if (native === 0) history.replaceState({ native }, '');
+				else history.pushState({ native }, '');
+				steps.push({ native, length: history.length, state: history.state });
+			}
+			output.textContent = JSON.stringify(steps);
+		};
+		const back = document.createElement('button');
+		back.dataset.testid = 'native-history-back';
+		back.textContent = 'Native back';
+		back.onclick = () => history.back();
+		document.body.append(push, back, output);
+	`
 	});
+	await frame.getByTestId('native-history-push').click();
+	const pushes = JSON.parse(
+		/** @type {string} */ (await frame.getByTestId('native-history-steps').textContent())
+	);
 	/** @type {{main: boolean, url: string}[]} */
 	const navigations = [];
 	/** @param {Frame} changed */
@@ -26,7 +44,10 @@ export async function observe_history(page, frame) {
 		navigations.push({ main: changed === page.mainFrame(), url: changed.url() });
 	page.on('framenavigated', record);
 	try {
-		await frame.evaluate(() => history.back()).catch(() => {});
+		await frame
+			.getByTestId('native-history-back')
+			.click()
+			.catch(() => {});
 		// Observation window, not a success condition. Assertions below still require traversal.
 		await new Promise((resolve) => setTimeout(resolve, 1000));
 		const snapshot = await frame

@@ -132,6 +132,13 @@ jobs:
               project: js
             }
           - {
+              app: hash-based-routing,
+              script: pw:build,
+              variant: inline,
+              browser: webkit,
+              project: js
+            }
+          - {
               app: embed,
               script: pw:build,
               variant: memory,
@@ -175,6 +182,8 @@ jobs:
         with:
           os: ${{ matrix.os || 'ubuntu-latest' }}
           e2e-browser: ${{ matrix.browser }}
+      - if: runner.os == 'Linux' && matrix.browser == 'webkit'
+        run: pnpm playwright install-deps webkit
       - run: pnpm run sync-all
       - shell: bash
         run: |
