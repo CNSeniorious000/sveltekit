@@ -26,6 +26,6 @@ jobs:
           curl --fail --location 'https://download.mozilla.org/?product=firefox-latest-ssl&os=linux64&lang=en-US' --output /tmp/firefox.tar.xz
           tar -xf /tmp/firefox.tar.xz -C /tmp
           python -m pip install selenium
-      - run: python scripts/firefox-srcdoc-official.py
+      - run: python scripts/firefox-srcdoc-official.py && python scripts/firefox-srcdoc-alternatives.py
         env:
           FIREFOX_BINARY: /tmp/firefox/firefox
