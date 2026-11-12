@@ -1,7 +1,8 @@
 import { expect } from '@playwright/test';
 import { test, variant } from '../../../utils.js';
 test.skip(variant !== 'memory', 'requires inline output');
-test.describe.configure({ mode: 'parallel' });
+test.describe.configure({ mode: 'parallel', retries: 0 });
+test.beforeEach(({page})=>{page.on('pageerror',e=>console.log('BLOB_PAGEERROR',e.message));page.on('console',m=>{if(m.type()==='error')console.log('BLOB_CONSOLE',m.text())})});
 async function mount(page, extra={}) {
  await page.goto('/app/memory?'+new URLSearchParams({transport:'blob',...extra}));
  await expect(page.getByTestId('host-status')).toHaveText('ready');
@@ -20,7 +21,7 @@ async function route(frame,slug){
  await expect(frame.getByTestId('server-slug')).toHaveText(slug);
 }
 for(const sandbox of [false,true]) {
- const extra=sandbox?{sandbox:''}:{};
+ const extra=sandbox?{sandbox:'',cors:''}:{};
  test('blob reload and navigation '+sandbox,async({page})=>{
   const frame=await mount(page,{...extra,cache:'miss'});
   await route(frame,'alpha');
@@ -85,3 +86,68 @@ for(const sandbox of [false,true]) {
   await expect(frame.getByTestId('load-count')).toHaveText('2');
  });
 }
+
+for(const sandbox of [false,true]) {
+ const extra=sandbox?{sandbox:'',cors:''}:{};
+ test('blob respects restrictive CSP '+sandbox,async({page})=>{
+  const frame=await mount(page,{...extra,simple:'',csp:'default-none'});
+  const url=new URL('/app/memory/data.json',page.url()).href;
+  expect(await frame.evaluate(async(url)=>{try{await fetch(url);return true}catch{return false}},url)).toBe(false);
+  await frame.getByTestId('counter').click();
+  await expect(frame.getByTestId('counter')).toHaveText('Count: 1');
+ });
+ test('blob still needs permitted scripts '+sandbox,async({page})=>{
+  await page.goto('/app/memory?'+new URLSearchParams({transport:'blob',simple:'',csp:'script-none',...extra}));
+  await expect(page.getByTestId('host-status')).toHaveText('ready');
+  const frame=page.frameLocator('[data-testid="frame-1"]');
+  await expect(frame.getByTestId('runtime')).toHaveText('server');
+  await expect(frame.locator('body')).not.toHaveClass('started');
+ });
+ test('blob relative base does not inherit the host URL '+sandbox,async({page})=>{
+  const frame=await mount(page,{...extra,simple:'',base:'relative'});
+  expect(await frame.evaluate(()=>document.baseURI)).toMatch(/^blob:/);
+  expect(await frame.evaluate(()=>{try{new URL('../resource',document.baseURI);return false}catch{return true}})).toBe(true);
+ });
+ test('blob URL lifetime and revocation '+sandbox,async({page})=>{
+  const frame=await mount(page,{...extra,simple:'',base:'opaque'});
+  const result=await page.evaluate(async()=>{
+   const url=document.querySelector('[data-testid="frame-1"]').src;
+   const before=await fetch(url).then(r=>r.ok);
+   URL.revokeObjectURL(url);
+   const after=await fetch(url).then(()=>true,()=>false);
+   return {before,after};
+  });
+  expect(result).toEqual({before:true,after:false});
+  await frame.getByTestId('counter').click();
+  await expect(frame.getByTestId('counter')).toHaveText('Count: 1');
+  await frame.evaluate(()=>location.reload()).catch(()=>{});
+  await expect(frame.getByTestId('runtime')).toHaveCount(0);
+ });
+}
+
+for(const sandbox of [false,true]) {
+ test('blob child-owned reload '+sandbox,async({page})=>{
+  const frame=await mount(page,{blobOwner:'child',simple:'',base:'opaque',...(sandbox?{sandbox:''}:{})});
+  await frame.getByTestId('counter').click();
+  await expect(frame.getByTestId('counter')).toHaveText('Count: 1');
+  await frame.evaluate(()=>location.reload());
+  await expect(frame.getByTestId('runtime')).toHaveText('browser');
+  await expect(frame.getByTestId('counter')).toHaveText('Count: 0');
+ });
+}
+test('blob opaque fetch still needs CORS',async({page})=>{
+ const frame=await mount(page,{sandbox:'',simple:'',base:'source'});
+ const url=new URL('/app/memory/data.json?token=no-cors',page.url()).href;
+ expect(await frame.evaluate(async url=>{try{await fetch(url);return true}catch{return false}},url)).toBe(false);
+});
+test('blob shallow state and traversal',async({page})=>{
+ const frame=await mount(page);
+ await frame.getByTestId('shallow-push').click();
+ await expect(frame.getByTestId('state')).toHaveText('{"modal":"open"}');
+ await frame.getByTestId('shallow-replace').click();
+ await expect(frame.getByTestId('state')).toHaveText('{"modal":"replaced"}');
+ await frame.evaluate(()=>history.back());
+ await expect(frame.getByTestId('state')).toHaveText('{}');
+ await frame.evaluate(()=>history.forward());
+ await expect(frame.getByTestId('state')).toHaveText('{"modal":"replaced"}');
+});

@@ -6,6 +6,8 @@ export function GET({ url }) {
 		origin: url.origin,
 		transport: url.searchParams.get('transport') ?? 'srcdoc',
 		cache: url.searchParams.get('cache') ?? 'hit',
+		cors: url.searchParams.has('cors'),
+		blobOwner: url.searchParams.get('blobOwner'),
 		csp: url.searchParams.get('csp'),
 		base: url.searchParams.get('base') ?? 'source',
 		sandbox: url.searchParams.has('sandbox'),
@@ -61,7 +63,7 @@ export function GET({ url }) {
 				: config.simple ? config.simple_path
 				: config.csr ? config.client_path : config.path;
 			const source = new URL(path, config.origin);
-			source.searchParams.set('token', crypto.randomUUID());
+			source.searchParams.set('token', (config.cors ? 'cors-' : '') + crypto.randomUUID());
 			source.searchParams.set('initial', '1');
 			source.searchParams.set('label', 'hello world');
 			if (config.redirect) source.searchParams.set('browser-redirect', '1');
@@ -76,10 +78,12 @@ export function GET({ url }) {
 					: config.csp === 'base-none' ? 'https://blocked.example/resources/' : source.href);
 				doc.head.prepend(base);
 			}
-			if (config.csp === 'base-none') {
+			if (config.csp === 'base-none' || config.csp === 'default-none' || config.csp === 'script-none') {
 				const policy = doc.createElement('meta');
 				policy.httpEquiv = 'Content-Security-Policy';
-				policy.content = "base-uri 'none'";
+				policy.content = config.csp === 'default-none'
+					? "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'"
+					: config.csp === 'script-none' ? "script-src 'none'" : "base-uri 'none'";
 				// The policy must precede the base when the iframe parses its document.
 				doc.head.prepend(policy);
 			}
@@ -107,7 +111,11 @@ export function GET({ url }) {
 			}
 			if (config.transport === 'blob') {
 				if (config.sandbox) frame.setAttribute('sandbox', 'allow-scripts allow-forms');
-				frame.src = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+				if (config.blobOwner === 'child') {
+					frame.srcdoc = '<script>location.replace(URL.createObjectURL(new Blob([decodeURIComponent(escape(atob("' + btoa(unescape(encodeURIComponent(html))) + '")))], { type: "text/html" })));</' + 'script>';
+				} else {
+					frame.src = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+				}
 			}
 			if (config.transport === 'data') {
 				frame.src = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
