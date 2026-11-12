@@ -1,4 +1,5 @@
 /** @import { HttpError } from '@sveltejs/kit' */
+import { current_url } from '../../routing.js';
 import { query_responses, handle_error } from '../../client.js';
 import { HandledHttpError } from '@sveltejs/kit/internal';
 import { QUERY_OVERRIDE_KEY } from '../shared.svelte.js';
@@ -145,7 +146,7 @@ export class Query {
 				const error = await handle_error(e, {
 					params: {},
 					route: { id: null },
-					url: new URL(location.href)
+					url: current_url()
 				});
 
 				// Re-check after the async `handle_error` gap: a later request may have

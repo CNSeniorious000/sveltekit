@@ -1,9 +1,15 @@
 /** @import { RemotePrerenderFunction } from '$app/server' */
+import { current_url } from '../routing.js';
 import { app_dir, base } from '#app/paths';
 import { version } from '$app/env';
 import * as devalue from 'devalue';
 import { app, _goto, handle_error, prerender_responses } from '../client.js';
-import { get_remote_request_headers, remote_request, unwrap_node } from './shared.svelte.js';
+import {
+	get_remote_request_headers,
+	remote_request,
+	resolve_remote_url,
+	unwrap_node
+} from './shared.svelte.js';
 import { create_remote_key, stringify_remote_arg } from '../../shared.js';
 import { noop } from '../../../utils/functions.js';
 import { HandledHttpError } from '@sveltejs/kit/internal';
@@ -66,17 +72,26 @@ export function prerender(id) {
 			resource = new Prerender(async () => {
 				await prerender_cache_ready;
 
-				const url = `${base}/${app_dir}/remote/${id}${payload ? `/${payload}` : ''}`;
+				const endpoint = `${base}/${app_dir}/remote/${id}${payload ? `/${payload}` : ''}`;
 
 				if (Object.hasOwn(prerender_responses, cache_key)) {
 					const data = unwrap_node(prerender_responses[cache_key]);
 
 					if (prerender_cache) {
-						void put(url, devalue.stringify(data, app.encoders));
+						let url;
+						try {
+							url = resolve_remote_url(endpoint);
+						} catch {
+							// A self-contained document may have no network base. Optional
+							// persistence must not prevent using an already serialized result.
+						}
+						if (url) void put(url, devalue.stringify(data, app.encoders));
 					}
 
 					return data;
 				}
+
+				const url = resolve_remote_url(endpoint);
 
 				// Do this here, after await Svelte' reactivity context is gone.
 				// TODO we really don't want to be sending these specific headers here?
@@ -164,7 +179,7 @@ class Prerender {
 				const error = await handle_error(e, {
 					params: {},
 					route: { id: null },
-					url: new URL(location.href)
+					url: current_url()
 				});
 				this.#loading = false;
 				this.#error = error;

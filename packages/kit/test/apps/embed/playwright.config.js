@@ -1,3 +1,5 @@
 import { configure } from '../../utils.js';
 
-export default configure();
+export default configure({
+	memory: { MEMORY_ROUTING: 'true' }
+});

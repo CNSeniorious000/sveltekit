@@ -123,10 +123,10 @@ export async function render_response({
 			({ base, assets } = resolve_paths(event.url.pathname));
 
 			// resolve e.g. '../..' against current location, then remove trailing slash
-			base_expression = `new URL(${s(base)}, location).pathname.slice(0, -1)`;
+			base_expression = `['about:', 'data:'].includes(location.protocol) ? ${s(paths.base)} : new URL(${s(base)}, location).pathname.slice(0, -1)`;
 		} else if (__SVELTEKIT_HASH_ROUTING__) {
 			// we have to assume that we're in the right place
-			base_expression = "new URL('.', location).pathname.slice(0, -1)";
+			base_expression = `['about:', 'data:'].includes(location.protocol) ? ${s(paths.base)} : new URL('.', location).pathname.slice(0, -1)`;
 		}
 	}
 
@@ -387,6 +387,12 @@ export async function render_response({
 
 		const properties = [`base: ${base_expression}`, `version: ${s(__SVELTEKIT_APP_VERSION__)}`];
 
+		if (__SVELTEKIT_INLINE__) {
+			properties.push(
+				`pathname: ${s(state.prerendering?.fallback ? paths.base + '/' : event.url.pathname + (is_prerendering(state) ? '' : event.url.search))}`
+			);
+		}
+
 		if (paths.assets) {
 			properties.push(`assets: ${s(paths.assets)}`);
 		}
@@ -482,7 +488,7 @@ export async function render_response({
 					); // make output after it's put together with the rest more readable
 					hydrate.push(`params: ${devalue.uneval(event.params)}`, `server_route: ${stringified}`);
 				}
-			} else if (__SVELTEKIT_EMBEDDED__) {
+			} else if (__SVELTEKIT_EMBEDDED__ || __SVELTEKIT_INLINE__) {
 				hydrate.push(`params: ${devalue.uneval(event.params)}`, `route: ${s(event.route)}`);
 			}
 

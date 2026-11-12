@@ -7,6 +7,7 @@
 /** @import { Query } from './remote-functions/query/instance.svelte.js' */
 /** @import { LiveQuery } from './remote-functions/query-live/instance.svelte.js' */
 import { DEV } from 'esm-env';
+import { opaque_hash_routing, memory_routing, initial_url, current_url } from './routing.js';
 import { settled, tick, fork, onMount, hydrate, mount } from 'svelte';
 import { HttpError, Redirect, SvelteKitError, HandledHttpError } from '@sveltejs/kit/internal';
 import { decode_pathname, strip_hash, make_trackable, normalize_path } from '../../utils/url.js';
@@ -19,6 +20,8 @@ import {
 	find_anchor,
 	resolve_url,
 	get_link_info,
+	get_native_link_url,
+	get_form_action,
 	get_router_options,
 	is_external_url,
 	origin,
@@ -76,6 +79,7 @@ import { capture_error } from '../../messages/internal/shared.js';
  *   historyIndex: number;
  *   navigationIndex: number;
  *   pageUrl?: string;
+ *   url?: string;
  *   state: string;
  *   persistState: boolean;
  *   resetIndex: number;
@@ -342,7 +346,12 @@ let hydrated = false;
 let started = false;
 let updating = false;
 let is_navigating = false;
-/** @type {HistoryMetadata | null} */
+/** @type {(HistoryMetadata & {
+ *   replace?: boolean;
+ *   fulfil?: (value: void) => void;
+ *   reject?: (reason: Error) => void;
+ *   token?: {};
+ * }) | null} */
 let hash_navigating = null;
 /** True as soon as there happened one client-side navigation (excluding the SvelteKit-initialized initial one when in SPA mode) */
 let has_navigated = false;
@@ -404,7 +413,7 @@ export const live_query_map = new Map();
 
 set_match_implementation(async (url) => {
 	if (typeof url === 'string') {
-		url = new URL(url, location.href);
+		url = new URL(url, current_url());
 	}
 
 	const intent = await get_navigation_intent(url, false);
@@ -463,7 +472,22 @@ async function _start(_app, _target, data) {
 		w.app_body_unwrapped({ tag: '%sveltekit.body%' });
 	}
 
-	if (payload.data) {
+	// Fragments are not part of the server-rendered route. Replaying the same
+	// document at a different logical anchor must not require a network request.
+	const restoring_memory_url =
+		memory_routing && strip_hash(current_url()) !== strip_hash(initial_url);
+
+	if (restoring_memory_url) {
+		// Serialized fetch responses can live outside the app's mount target. They
+		// belong to the original document, not the logical route we are restoring.
+		for (const script of document.querySelectorAll('script[data-sveltekit-fetched]')) {
+			script.remove();
+		}
+	}
+
+	// A restored memory URL may not match the document that supplied the SSR data.
+	// In that case the new page must not consume the old document's remote results.
+	if (payload.data && !restoring_memory_url) {
 		const { q = {}, p = {}, l = {}, f = {} } = payload.data;
 
 		// store the whole nodes — error records seed the corresponding
@@ -529,7 +553,8 @@ async function _start(_app, _target, data) {
 					navigationIndex: current_navigation_index,
 					state: stringify({}),
 					persistState: false,
-					resetIndex: current_history_index
+					resetIndex: current_history_index,
+					...(memory_routing && initial_url.origin !== 'null' && { url: initial_url.href })
 				}
 			},
 			''
@@ -551,14 +576,27 @@ async function _start(_app, _target, data) {
 		}
 	}
 
+	if (restoring_memory_url && data) {
+		// Reload/back-forward restoration can target a different route than the inline SSR document.
+		target.textContent = '';
+		data = undefined;
+	}
+
 	if (data) {
 		restore_reload_scroll();
 
+		const hydration_token = navigation_token;
 		await _hydrate(target, data);
+
+		// The browser cannot restore a fragment that exists only in history state.
+		// This is also needed when a sandbox prevents saving scroll in sessionStorage.
+		if (memory_routing && navigation_token === hydration_token && !scroll && current_url().hash) {
+			restore_scroll(current_url(), true, null);
+		}
 	} else {
 		await navigate({
 			type: 'enter',
-			url: resolve_url(app.hash ? decode_hash(new URL(location.href)) : location.href),
+			url: app.hash ? decode_hash(current_url()) : current_url(),
 			replace_state: true,
 			state: history_metadata?.persistState ? parse(history_metadata.state) : {},
 			persist_state: history_metadata?.persistState ?? false
@@ -890,7 +928,7 @@ async function initialize(result, target, should_hydrate) {
 	const nav = {
 		params: result.state.params,
 		route: { id: result.state.route?.id ?? null },
-		url: new URL(location.href)
+		url: current_url()
 	};
 
 	current = {
@@ -1145,7 +1183,7 @@ async function load_node({ loader, parent, url, params, route, server_data_node 
 			for (const dep of deps) {
 				if (DEV) validate_depends(/** @type {string} */ (route.id), dep);
 
-				const { href } = new URL(dep, url);
+				const { href } = resolve_route_url(dep, url);
 				uses.dependencies.add(href);
 			}
 		}
@@ -1265,19 +1303,40 @@ async function load_node({ loader, parent, url, params, route, server_data_node 
 }
 
 /**
+ * @param {string | URL} input
+ * @param {URL} url
+ */
+function resolve_route_url(input, url) {
+	try {
+		return new URL(input, opaque_hash_routing ? document.baseURI : url);
+	} catch (error) {
+		if (
+			(memory_routing || opaque_hash_routing) &&
+			(url.protocol === 'about:' || url.protocol === 'data:')
+		) {
+			throw new Error(
+				'Cannot resolve a relative URL in an embedded document without a usable HTTP(S) base URL. Provide a <base href> or use an absolute URL.',
+				{ cause: error }
+			);
+		}
+		throw error;
+	}
+}
+
+/**
  * @param {Request | string | URL} input
  * @param {RequestInit | undefined} init
  * @param {URL} url
  */
 function resolve_fetch_url(input, init, url) {
 	// we must fixup relative urls so they are resolved from the target page
-	const resolved = new URL(input instanceof Request ? input.url : input, url);
+	const resolved = resolve_route_url(input instanceof Request ? input.url : input, url);
 
 	const requested = fetch_cache_url(resolved, url);
 
 	const promise = started
 		? subsequent_fetch(requested, resolved.href, init)
-		: initial_fetch(requested, init);
+		: initial_fetch(requested, init, resolved.href);
 
 	return { resolved, promise };
 }
@@ -1534,8 +1593,9 @@ async function load_route({ id, invalidating, url, params, route, preload, actio
 				} else if (err instanceof HttpError) {
 					error = await handle_error(err, { params, url, route: { id: route.id } });
 				} else {
-					// Referenced node could have been removed due to redeploy, check
-					if (await updated.check()) {
+					// Referenced node could have been removed due to redeploy, check.
+					// A memory-routed inline app needs its host to supply updated HTML.
+					if ((await updated.check()) && !memory_routing) {
 						// Before reloading, try to update the service worker if it exists
 						await update_service_worker();
 						return await native_navigation(url);
@@ -1683,8 +1743,9 @@ async function load_root_error_page({ error, url, route }) {
 				// bring us right back here, turning this into an endless loop.
 				// if __data.json returned 404, the route doesn't exist — don't reload or we loop
 				if (
+					!memory_routing &&
 					!(e instanceof HttpError && e.status === 404) &&
-					(url.origin !== origin || url.pathname !== location.pathname || hydrated)
+					(url.origin !== origin || url.pathname !== current_url().pathname || hydrated)
 				) {
 					return await native_navigation(url);
 				}
@@ -1723,7 +1784,10 @@ async function load_root_error_page({ error, url, route }) {
 		// client-side navigation if the root layout loader throws a redirect while
 		// rendering the default error page
 		if (error instanceof Redirect) {
-			await _goto(new URL(error.location, location.href));
+			await _goto(
+				new URL(error.location, memory_routing ? url : current_url()),
+				memory_routing && !started ? { type: 'enter', replace: true } : undefined
+			);
 			return;
 		}
 
@@ -1812,6 +1876,23 @@ async function get_rerouted_url(url) {
  */
 export async function get_navigation_intent(url, invalidating) {
 	if (!url) return;
+	// A baseless inline document can still rerun the route that was hydrated.
+	// There is no new destination to resolve, and its SSR route/params are known.
+	if (
+		memory_routing &&
+		invalidating &&
+		(url.protocol === 'about:' || url.protocol === 'data:') &&
+		url.href === current.url?.href &&
+		current.route
+	) {
+		return {
+			id: get_page_key(url),
+			invalidating,
+			route: current.route,
+			params: current.params ?? {},
+			url
+		};
+	}
 	if (is_external_url(url, base, app.hash)) return;
 
 	if (__SVELTEKIT_CLIENT_ROUTING__) {
@@ -1878,12 +1959,24 @@ function get_page_key(url) {
  *   scroll?: { x: number, y: number };
  *   shallow?: boolean;
  *   target?: { params: Record<string, string> | null; route: { id: string } | null; url: URL };
+ *   will_unload?: boolean;
  * }} opts
  */
-function _before_navigate({ url, type, intent, delta, event, scroll, shallow = false, target }) {
+function _before_navigate({
+	url,
+	type,
+	intent,
+	delta,
+	event,
+	scroll,
+	shallow = false,
+	target,
+	will_unload
+}) {
 	let should_block = false;
 
 	const nav = create_navigation(current, intent, url, type, scroll ?? null, shallow, target);
+	if (will_unload !== undefined) nav.navigation.willUnload = will_unload;
 
 	if (nav.navigation.type === 'popstate' && delta !== undefined) {
 		nav.navigation.delta = delta;
@@ -2069,7 +2162,8 @@ async function navigate({
 
 		if (!navigation_result) return;
 	} else if (/** @type {number} */ (navigation_result.props.page.status) >= 400) {
-		if (await updated.check()) {
+		// Keep the update signal in memory mode, but let the host replace the inline app.
+		if ((await updated.check()) && !memory_routing) {
 			// Before reloading, try to update the service worker if it exists
 			await update_service_worker();
 			return await native_navigation(url, replace_state);
@@ -2121,12 +2215,13 @@ async function navigate({
 				navigationIndex: (current_navigation_index += change),
 				state: serialized_state,
 				persistState: persist_state,
-				resetIndex: current_reset_index
+				resetIndex: current_reset_index,
+				...(memory_routing && initial_url.origin !== 'null' && { url: url.href })
 			})
 		};
 
 		const fn = replace_state ? history.replaceState : history.pushState;
-		fn.call(history, entry, '', url);
+		fn.call(history, entry, '', memory_routing ? undefined : url);
 		set_history_options(current_history_index, entry[HISTORY_METADATA_KEY]);
 
 		if (!replace_state) {
@@ -2300,7 +2395,7 @@ async function finish_navigation(nav, nav_token, url, popped_scroll, reset, upda
  * @returns {Promise<import('./types.js').NavigationFinished | undefined>}
  */
 async function server_fallback(url, route, error, replace_state) {
-	if (url.origin === origin && url.pathname === location.pathname && !hydrated) {
+	if (url.origin === origin && url.pathname === current_url().pathname && !hydrated) {
 		// We would reload the same page we're currently on, which isn't hydrated,
 		// which means no SSR, which means we would end up in an endless loop
 		return await load_root_error_page({
@@ -2403,7 +2498,12 @@ function setup_preload() {
 		(entries) => {
 			for (const entry of entries) {
 				if (entry.isIntersecting) {
-					void _preload_code(new URL(/** @type {HTMLAnchorElement} */ (entry.target).href));
+					const { url, external } = get_link_info(
+						/** @type {HTMLAnchorElement} */ (entry.target),
+						base,
+						app.hash
+					);
+					if (url && !external) void _preload_code(url);
 					observer.unobserve(entry.target);
 				}
 			}
@@ -2700,7 +2800,7 @@ function push_invalidated(resource) {
 	if (typeof resource === 'function') {
 		invalidated.push(resource);
 	} else {
-		const { href } = new URL(resource, location.href);
+		const { href } = resolve_route_url(resource, current_url());
 		invalidated.push((url) => url.href === href);
 	}
 }
@@ -2937,12 +3037,13 @@ async function update_state(intent, state, { replace, persist_state, reset }, ca
 			pageUrl: page.url.href,
 			state: serialized_state,
 			persistState: persist_state,
-			resetIndex: current_reset_index
+			resetIndex: current_reset_index,
+			...(memory_routing && initial_url.origin !== 'null' && { url: url.href })
 		})
 	};
 
 	const fn = replace ? history.replaceState : history.pushState;
-	fn.call(history, entry, '', url);
+	fn.call(history, entry, '', memory_routing ? undefined : url);
 	set_history_options(current_history_index, entry[HISTORY_METADATA_KEY]);
 
 	if (!replace) {
@@ -3026,7 +3127,7 @@ export function is_current_location(value) {
 	if (value === undefined) return true;
 
 	const destination = resolve_url(value);
-	const current = new URL(location.href);
+	const current = current_url();
 	if (destination.origin !== current.origin || destination.pathname !== current.pathname)
 		return false;
 
@@ -3066,7 +3167,7 @@ export function apply_action_navigation(location, result, refresh_all) {
  * @param {App.Error} error
  */
 export async function set_nearest_error_page(error) {
-	const url = new URL(location.href);
+	const url = current_url();
 
 	const { branch, route } = current;
 	if (!route) return;
@@ -3178,12 +3279,41 @@ function _start_router() {
 
 		if (download) return;
 
-		const [nonhash, hash] = (app.hash ? url.hash.replace(/^#/, '') : url.href).split('#');
-		const same_pathname = nonhash === strip_hash(location);
+		const [nonhash, fragment] = (app.hash ? url.hash.replace(/^#/, '') : url.href).split('#');
+		const same_pathname = nonhash === strip_hash(current_url());
+		const native_fragment =
+			memory_routing && fragment !== undefined && nonhash === strip_hash(new URL(location.href));
+		const hash = native_fragment ? url.href.slice(nonhash.length + 1) : fragment;
+		// An actual document fragment can coexist with a different logical route.
+		// Keep that route instead of replacing page.url with about:srcdoc/about:blank.
+		const fragment_url = native_fragment ? new URL(current_url()) : url;
+		if (native_fragment) fragment_url.hash = '#' + hash;
+		const native_opt_out =
+			native_fragment &&
+			(!!target ||
+				(a.getAttribute('rel') || '').split(/\s+/).includes('external') ||
+				(options.reload && !hash));
+		const fragment_token = navigation_token;
+		const fragment_navigation = native_opt_out
+			? _before_navigate({ url, type: 'link', event, will_unload: false })
+			: undefined;
+
+		if (native_opt_out && (!fragment_navigation || fragment_token !== navigation_token)) {
+			fragment_navigation?.reject(new Error('navigation aborted'));
+			event.preventDefault();
+			return;
+		}
 
 		// Ignore the following but fire beforeNavigate
-		if (external || (options.reload && (!same_pathname || !hash))) {
-			if (_before_navigate({ url, type: 'link', event })) {
+		if (
+			!native_fragment &&
+			(external || (options.reload && (memory_routing || !same_pathname || !hash)))
+		) {
+			// The browser resolves native links against the document base, not the
+			// memory router's logical route. Report both its real destination and
+			// the unload, even when that destination belongs to the logical app.
+			const native_url = opaque_hash_routing ? get_native_link_url(a) : url;
+			if (_before_navigate({ url: native_url, type: 'link', event, will_unload: true })) {
 				// set `navigating` to `true` to prevent `beforeNavigate` callbacks
 				// being called when the page unloads
 				is_navigating = true;
@@ -3197,14 +3327,30 @@ function _start_router() {
 		// Check if new url only differs by hash and use the browser default behavior in that case
 		// This will ensure the `hashchange` event is fired
 		// Removing the hash does a full page navigation in the browser, so make sure a hash is present
-		if (hash !== undefined && same_pathname) {
+		if (native_fragment || (!memory_routing && hash !== undefined && same_pathname)) {
 			// If we are trying to navigate to the same hash, we should only
 			// attempt to scroll to that element and avoid any history changes.
 			// Otherwise a fragment navigation creates a new entry with a null history state,
 			// which browsers handle differently: https://github.com/whatwg/html/issues/6213
-			const [, current_hash] = current.url.href.split('#');
+			const current_hash = native_fragment
+				? location.href.includes('#')
+					? location.href.slice(nonhash.length + 1)
+					: undefined
+				: current.url.href.split('#')[1];
 			if (current_hash === hash) {
 				event.preventDefault();
+				if (native_fragment && fragment_url.href !== current_url().href) {
+					// A Kit navigation can change the logical hash without changing
+					// the document URL. No hashchange will fire to synchronize it here.
+					history.replaceState(
+						{
+							...history.state,
+							[HISTORY_METADATA_KEY]: { ...get_history_metadata(), url: fragment_url.href }
+						},
+						''
+					);
+					update_url(fragment_url);
+				}
 
 				// We're already on /# and click on a link that goes to /#, or we're on
 				// /#top and click on a link that goes to /#top. In those cases just go to
@@ -3219,21 +3365,42 @@ function _start_router() {
 					}
 				}
 
+				fragment_navigation?.fulfil(undefined);
 				return;
 			}
 			// set this flag to distinguish between navigations triggered by
 			// clicking a hash link and those triggered by popstate. We gotta retrieve
 			// history metadata here because the hashchange event will occur after history.state was updated
+			hash_navigating?.reject?.(new Error('navigation aborted'));
 			hash_navigating = {
 				.../** @type {HistoryMetadata} */ (get_history_metadata()),
-				resetIndex: current_reset_index + (options.reset ? 1 : 0)
+				resetIndex: current_reset_index + (options.reset ? 1 : 0),
+				...(native_fragment && { replace: !native_opt_out && options.replace_state }),
+				...(fragment_navigation && {
+					fulfil: fragment_navigation.fulfil,
+					reject: fragment_navigation.reject,
+					token: fragment_token
+				})
 			};
+
+			if (native_fragment) {
+				if (initial_url.origin === 'null') delete hash_navigating.url;
+				else hash_navigating.url = fragment_url.href;
+			}
 
 			capture_scroll(current_history_index);
 
-			update_url(url);
+			update_url(fragment_url);
 
-			if (!options.replace_state) return;
+			if (!options.replace_state || native_opt_out) return;
+
+			if (native_fragment) {
+				// Retain native fragment scrolling and hashchange without adding an
+				// entry or entering a route-loading pipeline that requires an HTTP base.
+				event.preventDefault();
+				location.replace(url.href);
+				return;
+			}
 
 			// hashchange event shouldn't occur if the router is replacing state.
 			hash_navigating = null;
@@ -3251,7 +3418,7 @@ function _start_router() {
 			setTimeout(fulfil, 100); // fallback for edge case where rAF doesn't fire because e.g. tab was backgrounded
 		});
 
-		const changed = url.href !== location.href;
+		const changed = url.href !== current_url().href;
 
 		await _goto(url, {
 			type: 'link',
@@ -3280,9 +3447,7 @@ function _start_router() {
 		if (method !== 'get') return;
 
 		// It is impossible to use form actions with hash router, so we just ignore handling them here
-		const url = new URL(
-			(submitter?.hasAttribute('formaction') && submitter?.formAction) || form.action
-		);
+		const url = get_form_action(form, submitter);
 
 		if (is_external_url(url, base, false)) return;
 
@@ -3303,7 +3468,7 @@ function _start_router() {
 			type: 'form',
 			url,
 			reset: options.reset,
-			replace_state: options.replace_state ?? url.href === location.href,
+			replace_state: options.replace_state ?? url.href === current_url().href,
 			event
 		});
 	});
@@ -3326,18 +3491,23 @@ function _start_router() {
 			const reset = reset_index !== (source_info?.resetIndex ?? current_reset_index);
 			const scroll = history_info[history_index]?.scroll;
 			const state = parse(history_metadata.state);
-			const url = new URL(history_metadata.pageUrl ?? location.href);
+			const url = new URL(
+				history_metadata.pageUrl ??
+					(memory_routing && initial_url.origin !== 'null' ? history_metadata.url : undefined) ??
+					location.href
+			);
 			const navigation_index = history_metadata.navigationIndex;
 			const is_hash_change =
-				current.url && (location.href + current.url.href).includes('#') // check if even has a hash
-					? strip_hash(location) === strip_hash(current.url)
+				current.url && (current_url().href + current.url.href).includes('#') // check if even has a hash
+					? strip_hash(current_url()) === strip_hash(current.url)
 					: false;
 			const shallow =
 				navigation_index === current_navigation_index &&
 				((has_navigated &&
-					(history_metadata.pageUrl === undefined || history_metadata.pageUrl === location.href)) ||
+					(history_metadata.pageUrl === undefined ||
+						history_metadata.pageUrl === current_url().href)) ||
 					is_hash_change);
-			const shallow_url = history_metadata.pageUrl ? new URL(location.href) : null;
+			const shallow_url = history_metadata.pageUrl ? current_url() : null;
 
 			// the browser has already traversed, so record the source entry and move the
 			// indices before anything async: a navigation that starts while this one
@@ -3412,7 +3582,7 @@ function _start_router() {
 			// document is clicked, we have to check that the router isn't already handling
 			// the navigation. otherwise we would be updating the page store twice.
 			if (!hash_navigating) {
-				const url = new URL(location.href);
+				const url = current_url();
 				update_url(url);
 
 				// if the user edits the hash via the browser URL bar, trigger a full-page
@@ -3428,22 +3598,27 @@ function _start_router() {
 		// if the hashchange happened as a result of clicking on a link,
 		// we need to update history, otherwise we have to leave it alone
 		if (hash_navigating) {
-			const history_metadata = hash_navigating;
+			const { replace = false, fulfil, reject, token, ...history_metadata } = hash_navigating;
 			hash_navigating = null;
+			if (fulfil && token !== navigation_token) {
+				reject?.(new Error('navigation aborted'));
+				return;
+			}
 			current_reset_index = history_metadata.resetIndex;
 			history.replaceState(
 				{
 					...history.state,
 					[HISTORY_METADATA_KEY]: {
 						...history_metadata,
-						historyIndex: ++current_history_index,
+						historyIndex: (current_history_index += replace ? 0 : 1),
 						navigationIndex: current_navigation_index
 					}
 				},
 				'',
-				location.href
+				memory_routing ? undefined : location.href
 			);
 			set_history_options(current_history_index, history_metadata);
+			fulfil?.(undefined);
 		}
 	});
 
@@ -3493,13 +3668,13 @@ async function _hydrate(
 ) {
 	hydrated = true;
 
-	const url = new URL(location.href);
+	const url = current_url();
 
 	/** @type {import('types').CSRRoute | undefined} */
 	let parsed_route;
 
 	if (__SVELTEKIT_CLIENT_ROUTING__) {
-		if (!__SVELTEKIT_EMBEDDED__) {
+		if (!__SVELTEKIT_EMBEDDED__ && !memory_routing) {
 			// See https://github.com/sveltejs/kit/pull/4935#issuecomment-1328093358 for one motivation
 			// of determining the params on the client side.
 			({ params = {}, route = { id: null } } = (await get_navigation_intent(url, false)) || {});
@@ -3572,19 +3747,29 @@ async function _hydrate(
 		if (error instanceof Redirect) {
 			// this is a real edge case — `load` would need to return
 			// a redirect but only in the browser
-			return await native_navigation(new URL(error.location, location.href));
+			const destination = resolve_route_url(error.location, url);
+			if (memory_routing && !is_external_url(destination, base, app.hash)) {
+				// The original SSR branch is no longer the page we will render. Start a
+				// client render without leaving the embedding document or adding history.
+				target.textContent = '';
+				hydrated = false;
+				return await _goto(destination, { type: 'enter', replace: true });
+			}
+			return await native_navigation(destination);
 		}
 
 		const handled_error = await handle_error(error, { url, params, route });
+
+		// Clear the failed SSR branch before loading the error page: its loader may
+		// redirect and mount a different page, which must not be removed afterwards.
+		target.textContent = '';
+		should_hydrate = false;
 
 		result = await load_root_error_page({
 			error: handled_error,
 			url,
 			route
 		});
-
-		target.textContent = '';
-		should_hydrate = false;
 	}
 
 	// Exit early when we encounter a redirect while loading the root error page.
@@ -3605,6 +3790,11 @@ async function _hydrate(
  * @returns {Promise<import('types').ServerNodesResponse | import('types').ServerRedirectNode>}
  */
 async function load_data(url, invalid) {
+	if (memory_routing && (url.protocol === 'about:' || url.protocol === 'data:')) {
+		throw new Error(
+			'Loading server data in an embedded document requires a usable HTTP(S) base URL.'
+		);
+	}
 	for (const key of url.searchParams.keys()) {
 		if (key.startsWith('x-sveltekit-')) {
 			e.reserved_query_parameter({ key });

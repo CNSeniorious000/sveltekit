@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import {
+	fetch_cache_url,
 	parse_remote_arg,
 	stringify_command_arg,
 	stringify_remote_arg,
@@ -430,4 +431,25 @@ describe('parse_remote_arg', () => {
 		expect(Object.keys(parsed)).toEqual(['nested', 'z']);
 		expect(Object.keys(parsed.nested)).toEqual(['a', 'b']);
 	});
+});
+
+test.each(['data:text/plain,inline', 'about:blank', 'about:srcdoc', 'file:///data.json'])(
+	'opaque-origin fetch cache keys retain the complete URL: %s',
+	(href) => {
+		expect(fetch_cache_url(new URL(href), { origin: 'null' })).toBe(href);
+	}
+);
+
+test('HTTP same-origin fetch cache keys still use the source path', () => {
+	expect(
+		fetch_cache_url(new URL('https://app.example/data.json?x=1'), {
+			origin: 'https://app.example'
+		})
+	).toBe('/data.json?x=1');
+});
+
+test('an absolute HTTP request in a baseless document keeps its origin in the cache key', () => {
+	expect(fetch_cache_url(new URL('https://app.example/data.json'), { origin: 'null' })).toBe(
+		'https://app.example/data.json'
+	);
 });

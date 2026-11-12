@@ -3,6 +3,8 @@
 /** @import { InternalRemoteFormIssue } from 'types' */
 import { app_dir, base } from '#app/paths';
 import { DEV } from 'esm-env';
+import { current_url } from '../routing.js';
+import { get_form_action } from '../utils.js';
 import * as e from '../../../messages/client-errors.js';
 import * as w from '../../../messages/client-warnings.js';
 
@@ -248,9 +250,9 @@ export function form(id) {
 									method: 'POST',
 									headers: {
 										'Content-Type': BINARY_FORM_CONTENT_TYPE,
-										// Forms cannot be called during rendering, so it's save to use location here
-										'x-sveltekit-pathname': location.pathname,
-										'x-sveltekit-search': location.search
+										// Forms use the current browser or logical memory-router URL.
+										'x-sveltekit-pathname': current_url().pathname,
+										'x-sveltekit-search': current_url().search
 									},
 									body: blob
 								},
@@ -407,11 +409,9 @@ export function form(id) {
 
 				if (method !== 'post') return;
 
-				const action = new URL(
-					// We can't do submitter.formAction directly because that property is always set
-					event.submitter?.hasAttribute('formaction')
-						? /** @type {HTMLButtonElement | HTMLInputElement} */ (event.submitter).formAction
-						: clone(form).action
+				const action = get_form_action(
+					clone(form),
+					/** @type {HTMLButtonElement | HTMLInputElement | null} */ (event.submitter)
 				);
 
 				if (action.searchParams.get('/remote') !== action_id) {
@@ -476,7 +476,7 @@ export function form(id) {
 					const error = await handle_error(e, {
 						params: {},
 						route: { id: null },
-						url: new URL(location.href)
+						url: current_url()
 					});
 					void set_nearest_error_page(error);
 				} finally {
@@ -723,9 +723,9 @@ export function form(id) {
 								method: 'POST',
 								headers: {
 									'Content-Type': BINARY_FORM_CONTENT_TYPE,
-									// Validation should not be and will not be called during rendering, so it's save to use location here
-									'x-sveltekit-pathname': location.pathname,
-									'x-sveltekit-search': location.search
+									// Validation uses the current browser or logical memory-router URL.
+									'x-sveltekit-pathname': current_url().pathname,
+									'x-sveltekit-search': current_url().search
 								},
 								body: serialize_binary_form(data, {
 									validate_only: true

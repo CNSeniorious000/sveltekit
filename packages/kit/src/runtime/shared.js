@@ -21,7 +21,9 @@ export function validate_depends(route_id, dep) {
  * @param {{ origin: string }} page
  */
 export function fetch_cache_url(url, page) {
-	return url.origin === page.origin ? url.href.slice(page.origin.length) : url.href;
+	return page.origin !== 'null' && url.origin === page.origin
+		? url.href.slice(page.origin.length)
+		: url.href;
 }
 
 export const INVALIDATED_PARAM = 'x-sveltekit-invalidated';

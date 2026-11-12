@@ -813,6 +813,8 @@ export interface RequestStore {
 
 /** Type of the `__sveltekit_abc123` object in the init `<script>` */
 export interface SvelteKitPayload {
+	/** Source pathname/query for inline documents with a non-hierarchical URL. */
+	pathname?: string;
 	/** The application version */
 	version: string;
 	/** The basepath, usually relative to the current page */

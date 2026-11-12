@@ -1,4 +1,4 @@
-import { assert, test, describe } from 'vitest';
+import { assert, test, describe, expect } from 'vitest';
 import { get_self_origin, is_csrf_forbidden, is_remote_forbidden } from './csrf.js';
 
 describe('get_self_origin', () => {
@@ -331,3 +331,48 @@ describe('is_remote_forbidden', () => {
 		}
 	);
 });
+
+const app_origin = 'https://app.example';
+
+for (const browser_origin of ['null', null, 'https://embedding.example']) {
+	test(`logical route headers do not authorize a form POST from origin ${browser_origin}`, () => {
+		const headers = new Headers({
+			'content-type': 'application/x-www-form-urlencoded',
+			'x-sveltekit-pathname': '/app/account',
+			'x-sveltekit-search': '?saved=1'
+		});
+		if (browser_origin !== null) headers.set('origin', browser_origin);
+		const request = new Request(`${app_origin}/app/account`, { method: 'POST', headers });
+		expect(
+			is_csrf_forbidden({
+				request,
+				request_origin: request.headers.get('origin'),
+				self_origin: get_self_origin(undefined, new URL(request.url).origin),
+				trusted_origins: []
+			})
+		).toBe(true);
+	});
+
+	test.each(['application/json', 'application/x-sveltekit-formdata'])(
+		`logical route headers do not authorize remote POST %s from origin ${browser_origin}`,
+		(content_type) => {
+			const headers = new Headers({
+				'content-type': content_type,
+				'x-sveltekit-pathname': '/app/account',
+				'x-sveltekit-search': '?saved=1'
+			});
+			if (browser_origin !== null) headers.set('origin', browser_origin);
+			const request = new Request(`${app_origin}/app/_app/remote/hash/function`, {
+				method: 'POST',
+				headers
+			});
+			expect(
+				is_remote_forbidden({
+					request,
+					request_origin: request.headers.get('origin'),
+					self_origin: get_self_origin(undefined, new URL(request.url).origin)
+				})
+			).toBe(true);
+		}
+	);
+}

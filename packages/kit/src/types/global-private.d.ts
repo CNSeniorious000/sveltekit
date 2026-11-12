@@ -33,6 +33,7 @@ declare global {
 	const __SVELTEKIT_CLIENT_ROUTING__: boolean;
 	/** True if `config.router.type === 'hash'` */
 	const __SVELTEKIT_HASH_ROUTING__: boolean;
+	const __SVELTEKIT_INLINE__: boolean;
 	/**
 	 * True if any node in the manifest has a server load function.
 	 * Used for treeshaking server load code from client bundles when no server loads exist.

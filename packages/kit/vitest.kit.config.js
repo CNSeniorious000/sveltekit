@@ -19,6 +19,9 @@ export default /** @satisfies {import('vitest/config').ViteUserConfig} */ ({
 	plugins: [svelte({ compilerOptions: { experimental: { async: true } } })],
 	define: {
 		__SVELTEKIT_GLOBAL_NAME__: '"__sveltekit_test"',
+		__SVELTEKIT_INLINE__: false,
+		__SVELTEKIT_HASH_ROUTING__: false,
+		__SVELTEKIT_PAYLOAD__: 'undefined',
 		__SVELTEKIT_SERVER_TRACING_ENABLED__: false,
 		__SVELTEKIT_APP_VERSION_POLL_INTERVAL__: 0,
 		__SVELTEKIT_APP_VERSION_CHECKS_ENABLED__: false

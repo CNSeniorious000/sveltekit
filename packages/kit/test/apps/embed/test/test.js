@@ -1,11 +1,12 @@
 import { expect } from '@playwright/test';
-import { test } from '../../../utils.js';
+import { test, variant } from '../../../utils.js';
 
 /** @typedef {import('@playwright/test').Response} Response */
 
 test.describe.configure({ mode: 'parallel' });
 
 test.describe('embed', () => {
+	test.skip(variant === 'memory', 'The inline variant has a separate iframe host');
 	test('serves embedded components in page', async ({ page, javaScriptEnabled }) => {
 		await page.goto('/embed');
 

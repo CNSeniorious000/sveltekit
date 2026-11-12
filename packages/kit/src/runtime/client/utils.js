@@ -1,12 +1,24 @@
 import { DEV } from 'esm-env';
+import { opaque_hash_routing, memory_routing, current_url, initial_url } from './routing.js';
+import { strip_hash } from '../../utils/url.js';
 import { PRELOAD_PRIORITIES } from './constants.js';
 import * as w from '../../messages/client-warnings.js';
 
-export const origin = location.origin;
+export const origin = memory_routing ? initial_url.origin : location.origin;
 
 /** @param {string | URL} url */
 export function resolve_url(url) {
 	if (url instanceof URL) return url;
+
+	// Fragment references belong to this embedded hash app, even when network
+	// resources use an inherited or explicit HTTP base. Use the URL parser to
+	// retain its whitespace and control-character handling.
+	if (opaque_hash_routing) {
+		try {
+			const resolved = new URL(url, location.href);
+			if (strip_hash(resolved) === strip_hash(location)) return resolved;
+		} catch {}
+	}
 
 	let baseURI = document.baseURI;
 
@@ -15,7 +27,36 @@ export function resolve_url(url) {
 		baseURI = baseTags.length ? baseTags[0].href : document.URL;
 	}
 
-	return new URL(url, baseURI);
+	try {
+		return new URL(url, baseURI);
+	} catch (error) {
+		if (
+			(memory_routing || opaque_hash_routing) &&
+			(initial_url.protocol === 'about:' || initial_url.protocol === 'data:')
+		) {
+			throw new Error(
+				'Cannot resolve a relative URL in an embedded document without a usable HTTP(S) base URL. Provide a <base href> or use an absolute URL.',
+				{ cause: error }
+			);
+		}
+		throw error;
+	}
+}
+
+/**
+ * Empty enhanced form actions target the logical current page. Explicit actions
+ * retain the effective document base, just like DOM links and native forms.
+ * @param {HTMLFormElement} form A shallow clone, to avoid DOM clobbering
+ * @param {HTMLButtonElement | HTMLInputElement | null} [submitter]
+ */
+export function get_form_action(form, submitter) {
+	const overridden = submitter?.hasAttribute('formaction') ? submitter : null;
+	if (memory_routing) {
+		const action = overridden ? overridden.getAttribute('formaction') : form.getAttribute('action');
+		return resolve_url(action || current_url().href);
+	}
+
+	return new URL(overridden ? overridden.formAction : form.action);
 }
 
 export function scroll_state() {
@@ -119,6 +160,11 @@ export function find_anchor(element, target) {
 	}
 }
 
+/** @param {HTMLAnchorElement | SVGAElement} a */
+export function get_native_link_url(a) {
+	return new URL(a instanceof SVGAElement ? a.href.baseVal : a.href, document.baseURI);
+}
+
 /**
  * @param {HTMLAnchorElement | SVGAElement} a
  * @param {string} base
@@ -130,7 +176,10 @@ export function get_link_info(a, base, uses_hash_router) {
 
 	// TODO replace the try/catch with `URL.parse` when browser support allows (Chrome 126, Firefox 126, Safari 18)
 	try {
-		url = new URL(a instanceof SVGAElement ? a.href.baseVal : a.href, document.baseURI);
+		url =
+			opaque_hash_routing && uses_hash_router
+				? resolve_url(a.getAttribute('href') ?? '')
+				: get_native_link_url(a);
 
 		// if the hash doesn't start with `#/` then it's probably linking to an id on the current page
 		if (uses_hash_router && url.hash.match(/^#[^/]/)) {
@@ -226,7 +275,16 @@ export function get_router_options(element) {
  * @param {boolean} hash_routing
  */
 export function is_external_url(url, base, hash_routing) {
-	if (url.origin !== origin || !url.pathname.startsWith(base)) {
+	if (hash_routing && opaque_hash_routing) {
+		return strip_hash(url) !== strip_hash(location);
+	}
+
+	// A logical route must not capture a sibling mount such as /app2 when the
+	// configured base is /app.
+	const outside_base = memory_routing
+		? url.pathname !== base && !url.pathname.startsWith(base + '/')
+		: !url.pathname.startsWith(base);
+	if (url.origin !== origin || outside_base) {
 		return true;
 	}
 

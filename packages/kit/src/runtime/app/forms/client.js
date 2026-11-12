@@ -11,7 +11,8 @@ import {
 } from '../../client/client.js';
 import { notify_version } from '#app/state/client';
 import { deserialize } from './shared.js';
-import { resolve_url } from '../../client/utils.js';
+import { get_form_action, origin, resolve_url } from '../../client/utils.js';
+import { current_url } from '../../client/routing.js';
 import * as e from '../../../messages/client-errors.js';
 import * as w from '../../../messages/client-warnings.js';
 
@@ -93,7 +94,7 @@ export function enhance(form_element, submit = noop) {
 
 		if (
 			destination === undefined ||
-			destination.origin !== location.origin ||
+			destination.origin !== origin ||
 			is_current_location(destination.href)
 		) {
 			if (should_refresh_all && result.type !== 'redirect') {
@@ -118,11 +119,9 @@ export function enhance(form_element, submit = noop) {
 
 		event.preventDefault();
 
-		const action = new URL(
-			// We can't do submitter.formAction directly because that property is always set
-			event.submitter?.hasAttribute('formaction')
-				? /** @type {HTMLButtonElement | HTMLInputElement} */ (event.submitter).formAction
-				: clone(form_element).action
+		const action = get_form_action(
+			clone(form_element),
+			/** @type {HTMLButtonElement | HTMLInputElement | null} */ (event.submitter)
 		);
 
 		const enctype = event.submitter?.hasAttribute('formenctype')
@@ -235,7 +234,7 @@ export function enhance(form_element, submit = noop) {
 				error: await handle_error(error, {
 					params: {},
 					route: { id: null },
-					url: new URL(location.href)
+					url: current_url()
 				})
 			};
 		}

@@ -3,6 +3,7 @@
 /** @import { CacheEntry } from './cache.svelte.js' */
 import * as devalue from 'devalue';
 import { app, _goto, live_query_map, query_map, query_responses } from '../client.js';
+import { initial_url, memory_routing } from '../routing.js';
 import { HttpError, Redirect, HandledHttpError } from '@sveltejs/kit/internal';
 import { untrack } from 'svelte';
 import { create_remote_key, split_remote_key } from '../../shared.js';
@@ -108,12 +109,27 @@ export function get_remote_request_headers() {
 }
 
 /**
+ * Keep framework requests on the initialized application origin even if an
+ * embedded document's base changes. Ordinary browser fetches still use the live base.
+ * @param {string} url
+ */
+export function resolve_remote_url(url) {
+	if (!memory_routing) return url;
+	if (url.startsWith('/') && initial_url.origin === 'null') {
+		throw new Error('Remote functions in an embedded document require a usable HTTP(S) base URL.');
+	}
+	// A root-relative endpoint can begin with // or /\\ when paths.base does.
+	// Concatenation keeps that pathname from being interpreted as a new authority.
+	return new URL(url.startsWith('/') ? initial_url.origin + url : url, initial_url).href;
+}
+
+/**
  * @param {string} url
  * @param {RequestInit} [init]
  * @param {Set<string> | null} [refreshes]
  */
 export async function remote_request(url, init, refreshes) {
-	const response = await fetch(url, init);
+	const response = await fetch(resolve_remote_url(url), init);
 	const status = response.status;
 
 	// detect new deployments from the response header

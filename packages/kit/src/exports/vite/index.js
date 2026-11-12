@@ -497,6 +497,7 @@ function kit({ svelte_config }) {
 					__SVELTEKIT_PATHS_RELATIVE__: s(kit.paths.relative),
 					__SVELTEKIT_CLIENT_ROUTING__: s(kit.router.resolution === 'client'),
 					__SVELTEKIT_HASH_ROUTING__: s(kit.router.type === 'hash'),
+					__SVELTEKIT_INLINE__: s(kit.output.bundleStrategy === 'inline'),
 					__SVELTEKIT_SERVER_TRACING_ENABLED__: s(kit.tracing.server),
 					__SVELTEKIT_SUPPORTS_ASYNC__: s(
 						svelte_config.compilerOptions?.experimental?.async ?? false

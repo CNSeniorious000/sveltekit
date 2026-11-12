@@ -1,4 +1,5 @@
 import { DEV } from 'esm-env';
+import { opaque_hash_routing, memory_routing, current_url } from './routing.js';
 import { hash_request } from '../../utils/hash.js';
 import { base64_decode } from '../utils.js';
 import { fetch_cache_url } from '../shared.js';
@@ -83,8 +84,9 @@ const cache = new Map();
  * Saves any requests with cache-control max-age to the cache.
  * @param {URL | string} resource
  * @param {RequestInit} [opts]
+ * @param {URL | string} [resolved]
  */
-export function initial_fetch(resource, opts) {
+export function initial_fetch(resource, opts, resolved = resource) {
 	const selector = build_selector(resource, opts);
 
 	if (selector) {
@@ -107,7 +109,7 @@ export function initial_fetch(resource, opts) {
 		}
 	}
 
-	return DEV ? dev_fetch(resource, opts) : window.fetch(resource, opts);
+	return DEV ? dev_fetch(resolved, opts) : window.fetch(resolved, opts);
 }
 
 /**
@@ -156,7 +158,11 @@ export function dev_fetch(resource, opts) {
  * @param {RequestInfo | URL} input
  */
 function clear_cache(input) {
-	const selector = build_selector(requested_url(input));
+	const requested = requested_url(input);
+	// An unresolvable native request must still reject through fetch, rather than
+	// throwing synchronously from this cache wrapper before the browser sees it.
+	if (requested === null) return;
+	const selector = build_selector(requested);
 	for (const key of cache.keys()) {
 		if (key.startsWith(selector)) cache.delete(key);
 	}
@@ -167,10 +173,18 @@ function clear_cache(input) {
  * @param {RequestInfo | URL} input
  */
 function requested_url(input) {
-	return fetch_cache_url(
-		new URL(input instanceof Request ? input.url : input, location.href),
-		location
-	);
+	try {
+		return fetch_cache_url(
+			new URL(
+				input instanceof Request ? input.url : input,
+				memory_routing || opaque_hash_routing ? document.baseURI : location.href
+			),
+			current_url()
+		);
+	} catch (error) {
+		if (memory_routing || opaque_hash_routing) return null;
+		throw error;
+	}
 }
 
 /**

@@ -1,3 +1,4 @@
+import { current_url } from '../../routing.js';
 import { query_responses, handle_error } from '../../client.js';
 import { HttpError, Redirect, HandledHttpError } from '@sveltejs/kit/internal';
 import { noop, once } from '../../../../utils/functions.js';
@@ -416,7 +417,7 @@ export class LiveQuery {
 		const error = await handle_error(e, {
 			params: {},
 			route: { id: null },
-			url: new URL(location.href)
+			url: current_url()
 		});
 		this.fail(new HandledHttpError(error));
 	}

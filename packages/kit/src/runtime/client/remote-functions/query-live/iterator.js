@@ -2,7 +2,7 @@
 import { app_dir, base } from '#app/paths';
 import { app } from '../../client.js';
 import { notify_version } from '#app/state/client';
-import { handle_side_channel_response } from '../shared.svelte.js';
+import { handle_side_channel_response, resolve_remote_url } from '../shared.svelte.js';
 import * as devalue from 'devalue';
 import { HttpError, HandledHttpError } from '@sveltejs/kit/internal';
 import { noop } from '../../../../utils/functions.js';
@@ -24,7 +24,7 @@ export async function* create_live_iterator(
 ) {
 	const url = `${base}/${app_dir}/remote/${id}${payload ? `?payload=${payload}` : ''}`;
 
-	const response = await fetch(url, {
+	const response = await fetch(resolve_remote_url(url), {
 		headers: { accept: 'text/event-stream' },
 		signal: controller.signal
 	});
