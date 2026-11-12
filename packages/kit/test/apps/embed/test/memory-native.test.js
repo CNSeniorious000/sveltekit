@@ -1,4 +1,5 @@
 import { expect } from '@playwright/test';
+import { observe_history } from './memory-history.js';
 import { test, variant } from '../../../utils.js';
 
 /** @param {import('@playwright/test').Page} page @param {string} head */
@@ -100,48 +101,16 @@ test.describe('native document-written about:blank base controls', () => {
 		await page.goto('/app/memory?simple&base=opaque');
 		await expect(page.getByTestId('host-status')).toHaveText('ready');
 		const frame = await mount_native(page, '');
-		await frame.evaluate(() => {
-			history.replaceState({ native: 0 }, '');
-			history.pushState({ native: 1 }, '');
-			history.pushState({ native: 2 }, '');
-		});
-		await page.evaluate(() => {
-			const result = document.createElement('pre');
-			result.dataset.testid = 'native-history-result';
-			result.textContent = 'pending';
-			document.body.append(result);
-			const frame = /** @type {HTMLIFrameElement} */ (
-				document.querySelector('[data-testid="native-probe"]')
-			);
-			/** @param {string} event */
-			function record(event) {
-				const win = /** @type {Window} */ (frame.contentWindow);
-				result.textContent = JSON.stringify({
-					event,
-					href: win.location.href,
-					state: win.history.state,
-					retained_document: win.document.documentElement.dataset.nativeReady === 'true',
-					body: win.document.body?.textContent
-				});
-			}
-			frame.contentWindow?.addEventListener('popstate', () => record('popstate'), { once: true });
-			frame.addEventListener('load', () => record('load'), { once: true });
-			frame.contentWindow?.history.back();
-		});
-		await expect(page.getByTestId('native-history-result')).not.toHaveText('pending');
-		const result = JSON.parse(
-			/** @type {string} */ (await page.getByTestId('native-history-result').textContent())
-		);
+		const result = await observe_history(page, frame);
 		const report = JSON.stringify({ browser: test.info().project.name, result });
 		console.log('Native written-document history control:', report);
-		await test.info().attach('native-written-document-history', {
-			body: report,
-			contentType: 'application/json'
-		});
-		expect(result.href).toBe('about:blank');
-		// Report whether the engine keeps a document.write-created Document. Kit
-		// cannot handle popstate in a Document the browser discarded altogether.
-		if (result.retained_document) expect(result.state).toEqual({ native: 1 });
+		await test
+			.info()
+			.attach('native-written-document-history', { body: report, contentType: 'application/json' });
+		expect(result.host_after).toBe(result.host);
+		if ('error' in result.document) throw new Error(result.document.error);
+		expect(result.document.href).toBe('about:blank');
+		expect(result.document.state).toEqual({ native: 1 });
 	});
 });
 
@@ -190,4 +159,27 @@ test('native data document catches a denied fetch', async ({ page, javaScriptEna
 		.attach('native-caught-cors-fetch', { body: report, contentType: 'application/json' });
 	expect(result.caught).toBe(true);
 	expect(result.unhandled).toEqual([]);
+});
+
+test('native opaque sandbox checks parent access in its own script', async ({
+	page,
+	javaScriptEnabled
+}) => {
+	test.skip(variant !== 'memory' || !javaScriptEnabled, 'Requires scripted inline documents');
+	await page.goto('/app/memory?simple&base=opaque');
+	const result = await page.evaluate(
+		() =>
+			new Promise((resolve) => {
+				const iframe = document.createElement('iframe');
+				iframe.setAttribute('sandbox', 'allow-scripts');
+				addEventListener('message', (event) => {
+					if (event.source === iframe.contentWindow && event.data?.type === 'sandbox-access')
+						resolve(event.data);
+				});
+				iframe.srcdoc = `<script>let error = null; let accessible = false; try { accessible = !!parent.document; } catch (e) { error = e.name; } parent.postMessage({ type: 'sandbox-access', error, accessible }, '*');<\/script>`;
+				document.body.append(iframe);
+			})
+	);
+	console.log('Native sandbox script access:', JSON.stringify(result));
+	expect(result).toEqual({ type: 'sandbox-access', error: 'SecurityError', accessible: false });
 });

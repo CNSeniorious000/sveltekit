@@ -117,8 +117,8 @@ jobs:
           - { script: test:cross-platform:build, os: windows-latest, workers: 2 }
           - { script: test:cross-platform:dev, browser: firefox }
           - { script: test:cross-platform:build, browser: firefox }
-          - { script: test:cross-platform:dev, os: macOS-latest, browser: webkit, workers: 3 }
-          - { script: test:cross-platform:build, os: macOS-latest, browser: webkit, workers: 3 }
+          - { script: test:cross-platform:dev, os: macos-15-intel, browser: webkit, workers: 3 }
+          - { script: test:cross-platform:build, os: macos-15-intel, browser: webkit, workers: 3 }
           # Keep inline fixtures independent so one failure does not prevent testing
           # the other router. The rest legs retain their ordinary HTTP controls.
           - { app: embed, script: pw:build, variant: memory, project: js }
@@ -135,7 +135,7 @@ jobs:
               app: embed,
               script: pw:build,
               variant: memory,
-              os: macOS-latest,
+              os: macos-15-intel,
               browser: webkit,
               project: js,
               workers: 3
@@ -144,7 +144,7 @@ jobs:
               app: hash-based-routing,
               script: pw:build,
               variant: inline,
-              os: macOS-latest,
+              os: macos-15-intel,
               browser: webkit,
               project: js,
               workers: 3

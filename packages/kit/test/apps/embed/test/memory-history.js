@@ -5,48 +5,77 @@ import { expect } from '@playwright/test';
 /** @type {WeakMap<Page, boolean>} */
 const retained = new WeakMap();
 
-/** Compare with the engine's native document.write lifetime, not its name.
- * @param {Page} page
+/** Observe from Node: WebKit may navigate the host, destroying DOM observers.
+ * @param {Page} page @param {Frame} frame
  */
+export async function observe_history(page, frame) {
+	const host = page.url();
+	const pushes = await frame.evaluate(() => {
+		const steps = [];
+		for (const native of [0, 1, 2]) {
+			if (native === 0) history.replaceState({ native }, '');
+			else history.pushState({ native }, '');
+			steps.push({ native, length: history.length, state: history.state });
+		}
+		return steps;
+	});
+	/** @type {{main: boolean, url: string}[]} */
+	const navigations = [];
+	/** @param {Frame} changed */
+	const record = (changed) =>
+		navigations.push({ main: changed === page.mainFrame(), url: changed.url() });
+	page.on('framenavigated', record);
+	try {
+		await frame.evaluate(() => history.back()).catch(() => {});
+		// Observation window, not a success condition. Assertions below still require traversal.
+		await new Promise((resolve) => setTimeout(resolve, 1000));
+		const snapshot = await frame
+			.evaluate(() => ({
+				href: location.href,
+				state: history.state,
+				retained:
+					!!document.body?.dataset.nativeWritten ||
+					document.documentElement.dataset.nativeReady === 'true',
+				body: document.body?.textContent
+			}))
+			.catch((error) => ({ error: String(error) }));
+		return { host, host_after: page.url(), pushes, navigations, document: snapshot };
+	} finally {
+		page.off('framenavigated', record);
+	}
+}
+
+/** @param {Page} page */
 async function retains_written_document(page) {
 	if (retained.has(page)) return retained.get(page);
 	const control = await page.context().newPage();
 	try {
 		await control.goto(page.url());
-		const result = await control.evaluate(
-			() =>
-				new Promise((resolve) => {
-					const iframe = document.createElement('iframe');
-					iframe.src = 'about:blank';
-					iframe.onload = () => {
-						iframe.onload = null;
-						const doc = /** @type {Document} */ (iframe.contentDocument);
-						const script = doc.createElement('script');
-						script.textContent =
-							'setTimeout(() => { document.open(); document.write("<body data-native-written=true>native control</body>"); document.close(); }, 0);';
-						doc.body.append(script);
-						// Wait for the asynchronously written document before creating entries.
-						iframe.onload = () => {
-							iframe.onload = null;
-							const win = /** @type {Window} */ (iframe.contentWindow);
-							win.history.replaceState({ native: 0 }, '');
-							win.history.pushState({ native: 1 }, '');
-							win.history.pushState({ native: 2 }, '');
-							const record = () =>
-								win.history.state?.native === 1 &&
-								resolve({
-									retained: win.document.body?.dataset.nativeWritten === 'true',
-									state: win.history.state,
-									href: win.location.href
-								});
-							win.addEventListener('popstate', record, { once: true });
-							iframe.addEventListener('load', record, { once: true });
-							win.history.back();
-						};
-					};
-					document.body.append(iframe);
-				})
-		);
+		await control.evaluate(() => {
+			const iframe = document.createElement('iframe');
+			iframe.dataset.testid = 'history-control';
+			iframe.src = 'about:blank';
+			iframe.onload = () => {
+				iframe.onload = null;
+				const doc = /** @type {Document} */ (iframe.contentDocument);
+				const script = doc.createElement('script');
+				script.textContent =
+					'setTimeout(() => { document.open(); document.write("<body data-native-written=true>native control</body>"); document.close(); }, 0);';
+				doc.body.append(script);
+			};
+			document.body.append(iframe);
+		});
+		await expect(
+			control.frameLocator('[data-testid="history-control"]').locator('body')
+		).toHaveAttribute('data-native-written', 'true');
+		const element = await control.getByTestId('history-control').elementHandle();
+		const frame = await element?.contentFrame();
+		if (!frame) throw new Error('Missing native history frame');
+		const observation = await observe_history(control, frame);
+		console.log('Native history capability:', JSON.stringify(observation));
+		expect(observation.host_after).toBe(observation.host);
+		const result = observation.document;
+		if ('error' in result) throw new Error(result.error);
 		expect(result.href).toBe('about:blank');
 		expect(result.state).toEqual({ native: 1 });
 		retained.set(page, result.retained);

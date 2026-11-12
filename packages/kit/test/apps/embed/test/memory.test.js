@@ -111,65 +111,103 @@ test.afterEach(async ({ page }, test_info) => {
 });
 
 for (const sandbox of [false, true]) {
-	test(`native srcdoc reload control${sandbox ? ' in an opaque sandbox' : ''}`, async ({
-		page,
-		javaScriptEnabled
-	}) => {
-		test.skip(!javaScriptEnabled, 'The native control uses iframe scripts');
-		await page.route('**/app/native-reload-control', (route) =>
-			route.fulfill({
-				contentType: 'text/html',
-				body: '<!doctype html><body class="started"><p>Native reload control</p></body>'
-			})
-		);
-		await page.goto('/app/native-reload-control', { wait_for_started: false });
-		await page.evaluate((sandbox) => {
-			const iframe = document.createElement('iframe');
-			iframe.name = 'native-reload';
-			if (sandbox) iframe.setAttribute('sandbox', 'allow-scripts');
-			window.addEventListener('message', (event) => {
-				if (event.source !== iframe.contentWindow || event.data?.type !== 'native-reload') return;
-				document.body.dataset.nativeRun = event.data.run;
-				document.body.dataset.nativeMessage = JSON.stringify(event.data);
+	for (const operation of [
+		'none',
+		'replace-omitted',
+		'replace-undefined',
+		'replace-self-url',
+		'push-omitted',
+		'scroll-restoration',
+		'storage',
+		'base'
+	]) {
+		test(`native srcdoc reload control${sandbox ? ' in an opaque sandbox' : ''}: ${operation}`, async ({
+			page,
+			javaScriptEnabled
+		}) => {
+			test.skip(!javaScriptEnabled, 'The native control uses iframe scripts');
+			test.skip(
+				sandbox && operation === 'storage',
+				'Opaque documents cannot access sessionStorage'
+			);
+			await page.route('**/app/native-reload-control', (route) =>
+				route.fulfill({
+					contentType: 'text/html',
+					body: '<!doctype html><body class="started"><p>Native reload control</p></body>'
+				})
+			);
+			await page.goto('/app/native-reload-control', { wait_for_started: false });
+			await page.evaluate((sandbox) => {
+				const iframe = document.createElement('iframe');
+				iframe.name = 'native-reload';
+				if (sandbox) iframe.setAttribute('sandbox', 'allow-scripts');
+				window.addEventListener('message', (event) => {
+					if (event.source !== iframe.contentWindow || event.data?.type !== 'native-reload') return;
+					document.body.dataset.nativeRun = event.data.run;
+					document.body.dataset.nativeMessage = JSON.stringify(event.data);
+				});
+				iframe.srcdoc =
+					'<!doctype html><body><p data-testid="counter">Count: 0</p><script>document.body.dataset.run = Math.random().toString(); parent.postMessage({ type: "native-reload", run: document.body.dataset.run, url: location.href, origin: location.origin, counter: document.querySelector("[data-testid=counter]").textContent }, "*");</' +
+					'script>';
+				document.body.append(iframe);
+			}, sandbox);
+			const frame = await content_frame(page.locator('iframe[name="native-reload"]'));
+			await expect(frame.getByTestId('counter')).toHaveText('Count: 0');
+			await expect(frame.locator('body')).toHaveAttribute('data-run', /.+/);
+			const run = await frame.locator('body').getAttribute('data-run');
+			await expect(page.locator('body')).toHaveAttribute(
+				'data-native-run',
+				/** @type {string} */ (run)
+			);
+			await frame.evaluate(() => {
+				/** @type {HTMLElement} */ (document.querySelector('[data-testid="counter"]')).textContent =
+					'Count: 1';
 			});
-			iframe.srcdoc =
-				'<!doctype html><body><p data-testid="counter">Count: 0</p><script>document.body.dataset.run = Math.random().toString(); parent.postMessage({ type: "native-reload", run: document.body.dataset.run, url: location.href, origin: location.origin, counter: document.querySelector("[data-testid=counter]").textContent }, "*");</' +
-				'script>';
-			document.body.append(iframe);
-		}, sandbox);
-		const frame = await content_frame(page.locator('iframe[name="native-reload"]'));
-		await expect(frame.getByTestId('counter')).toHaveText('Count: 0');
-		await expect(frame.locator('body')).toHaveAttribute('data-run', /.+/);
-		const run = await frame.locator('body').getAttribute('data-run');
-		await expect(page.locator('body')).toHaveAttribute(
-			'data-native-run',
-			/** @type {string} */ (run)
-		);
-		await frame.evaluate(() => {
-			/** @type {HTMLElement} */ (document.querySelector('[data-testid="counter"]')).textContent =
-				'Count: 1';
+			await expect(frame.getByTestId('counter')).toHaveText('Count: 1');
+			await frame.evaluate((operation) => {
+				const entry = {
+					'sveltekit:metadata': {
+						historyIndex: 1,
+						navigationIndex: 1,
+						resetIndex: 1,
+						state: '{}',
+						persistState: false,
+						url: 'http://localhost/example'
+					}
+				};
+				if (operation === 'replace-omitted') history.replaceState(entry, '');
+				if (operation === 'replace-undefined') history.replaceState(entry, '', undefined);
+				if (operation === 'replace-self-url') history.replaceState(entry, '', location.href);
+				if (operation === 'push-omitted') history.pushState(entry, '');
+				if (operation === 'scroll-restoration') history.scrollRestoration = 'manual';
+				if (operation === 'storage') sessionStorage.setItem('native-reload-probe', '{}');
+				if (operation === 'base') {
+					const base = document.createElement('base');
+					base.href = 'http://localhost/example';
+					document.head.append(base);
+				}
+			}, operation);
+			await frame.evaluate(() => location.reload());
+			// This observation crosses origins via postMessage, without Playwright's frame realm.
+			await expect(page.locator('body')).not.toHaveAttribute(
+				'data-native-run',
+				/** @type {string} */ (run)
+			);
+			expect(
+				JSON.parse(
+					/** @type {string} */ (await page.locator('body').getAttribute('data-native-message'))
+				)
+			).toMatchObject({
+				url: 'about:srcdoc',
+				counter: 'Count: 0'
+			});
+			await expect(frame.getByTestId('counter')).toHaveText('Count: 0');
+			await expect(frame.locator('body')).not.toHaveAttribute(
+				'data-run',
+				/** @type {string} */ (run)
+			);
 		});
-		await expect(frame.getByTestId('counter')).toHaveText('Count: 1');
-		await frame.evaluate(() => location.reload());
-		// This observation crosses origins via postMessage, without Playwright's frame realm.
-		await expect(page.locator('body')).not.toHaveAttribute(
-			'data-native-run',
-			/** @type {string} */ (run)
-		);
-		expect(
-			JSON.parse(
-				/** @type {string} */ (await page.locator('body').getAttribute('data-native-message'))
-			)
-		).toMatchObject({
-			url: 'about:srcdoc',
-			counter: 'Count: 0'
-		});
-		await expect(frame.getByTestId('counter')).toHaveText('Count: 0');
-		await expect(frame.locator('body')).not.toHaveAttribute(
-			'data-run',
-			/** @type {string} */ (run)
-		);
-	});
+	}
 }
 
 test.describe('inline routing in about/data documents', () => {
@@ -206,6 +244,13 @@ test.describe('inline routing in about/data documents', () => {
 				/** @type {string[]} */
 				const data_requests = [];
 				page.on('pageerror', (error) => errors.push(error.message));
+				await page.addInitScript(() => {
+					addEventListener('unhandledrejection', (event) => {
+						const prior = JSON.parse(document.documentElement.dataset.unhandledRejections || '[]');
+						prior.push(String(event.reason));
+						document.documentElement.dataset.unhandledRejections = JSON.stringify(prior);
+					});
+				});
 				page.on('request', (request) => {
 					if (
 						new URL(request.url()).pathname.endsWith('/data.json') ||
@@ -247,7 +292,19 @@ test.describe('inline routing in about/data documents', () => {
 				await expect(frame.getByTestId('load-url')).toHaveText(frame.url());
 				await expect(frame.getByTestId('counter')).toHaveText('Count: 1');
 
-				expect(errors).toEqual([]);
+				// Native data fetch control proves WebKit reports this caught CORS failure
+				// as pageerror. Exclude only this exact version-poll network diagnostic.
+				const version_cors =
+					new URL('/app/_app/version.json', page.url()).href.replace(/^https?:\//, '') +
+					' due to access control checks.';
+				expect(errors.filter((error) => transport !== 'data' || error !== version_cors)).toEqual(
+					[]
+				);
+				expect(
+					await frame.evaluate(() =>
+						JSON.parse(document.documentElement.dataset.unhandledRejections || '[]')
+					)
+				).toEqual([]);
 				expect(data_requests).toEqual([]);
 				expect(invalidation_requests).toEqual([]);
 				await expect_document(frame, transport);
