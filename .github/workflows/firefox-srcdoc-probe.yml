@@ -15,3 +15,17 @@ jobs:
       - uses: ./.github/actions/node-setup
       - run: pnpm playwright install --with-deps firefox
       - run: node scripts/firefox-srcdoc-probe.mjs
+  official-firefox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - run: |
+          curl --fail --location 'https://download.mozilla.org/?product=firefox-latest-ssl&os=linux64&lang=en-US' --output /tmp/firefox.tar.xz
+          tar -xf /tmp/firefox.tar.xz -C /tmp
+          python -m pip install selenium
+      - run: python scripts/firefox-srcdoc-official.py
+        env:
+          FIREFOX_BINARY: /tmp/firefox/firefox

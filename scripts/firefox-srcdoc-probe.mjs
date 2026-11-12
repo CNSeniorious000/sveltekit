@@ -21,6 +21,7 @@ const cases=[
  ['replace-then-navigation-update','history.replaceState({probe:1},"");navigation.updateCurrentEntry({state:{probe:1}})'],
  ['load-delay-replace','await new Promise(r=>setTimeout(r,500));history.replaceState({probe:1},"")']
 ];
+console.log('BROWSER '+browser.version());
 const rows=[];
 for(const sandbox of [false,true]) for(const [name,operation] of cases){
  const page=await browser.newPage();
@@ -35,7 +36,7 @@ for(const sandbox of [false,true]) for(const [name,operation] of cases){
  },{sandbox,operation});
  const f=page.frameLocator('iframe');
  await f.locator('#operate').click();
- await page.waitForFunction(()=>window.messages.some(m=>m.type==='operated'||m.type==='operation-error'));
+ try{await page.waitForFunction(()=>window.messages.some(m=>m.type==='operated'||m.type==='operation-error'),{},{timeout:3000})}catch{console.log('OPERATION_TIMEOUT '+JSON.stringify({sandbox,name}));}
  const before=await page.evaluate(()=>window.messages);
  if(!before.some(m=>m.type==='operation-error')){
  try{await f.locator('#reload').click({timeout:2000});await page.waitForFunction(()=>window.messages.filter(m=>m.type==='load').length>1,{},{timeout:2500});}catch{}
