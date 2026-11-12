@@ -100,11 +100,12 @@ async function retains_written_document(page) {
 		await control.evaluate(() => {
 			const iframe = document.createElement('iframe');
 			iframe.dataset.testid = 'history-control';
-			iframe.srcdoc = '<!doctype html><body>Initialize document</body>';
+			iframe.src = 'about:blank';
+			let initialized = false;
 			iframe.onload = () => {
-				if (iframe.hasAttribute('srcdoc')) {
-					iframe.removeAttribute('srcdoc');
-					iframe.src = 'about:blank';
+				if (!initialized) {
+					initialized = true;
+					iframe.contentWindow.location.replace('about:blank');
 					return;
 				}
 				iframe.onload = null;
@@ -195,11 +196,12 @@ export async function blank_history_delta(page, operation, after_navigation) {
 			({ operation, after_navigation }) => {
 				const iframe = document.createElement('iframe');
 				iframe.dataset.testid = 'fragment-control';
-				iframe.srcdoc = '<!doctype html><body>Initialize document</body>';
+				iframe.src = 'about:blank';
+			let initialized = false;
 				iframe.onload = () => {
-				if (iframe.hasAttribute('srcdoc')) {
-					iframe.removeAttribute('srcdoc');
-					iframe.src = 'about:blank';
+				if (!initialized) {
+					initialized = true;
+					iframe.contentWindow.location.replace('about:blank');
 					return;
 				}
 					iframe.onload = null;

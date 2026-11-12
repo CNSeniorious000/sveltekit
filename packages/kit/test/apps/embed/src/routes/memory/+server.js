@@ -109,11 +109,12 @@ export function GET({ url }) {
 				frame.src = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
 			}
 			if (config.transport === 'blank') {
-				frame.srcdoc = '<!doctype html><body>Initialize document</body>';
+				frame.src = 'about:blank';
+				let initialized = false;
 				frame.onload = () => {
-					if (frame.hasAttribute('srcdoc')) {
-						frame.removeAttribute('srcdoc');
-						frame.src = 'about:blank';
+					if (!initialized) {
+						initialized = true;
+						frame.contentWindow.location.replace('about:blank');
 						return;
 					}
 					frame.onload = null;
