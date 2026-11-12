@@ -26,7 +26,10 @@ for sandbox in [False,True]:
   WebDriverWait(driver,5).until(lambda d:d.execute_script('return window.messages.length')>1)
   before=driver.execute_script('return window.messages')
   if not any(x['type']=='error' for x in before):
-   driver.switch_to.frame(driver.find_element('tag name','iframe'));driver.find_element('id','reload').click();driver.switch_to.default_content()
+   driver.switch_to.frame(driver.find_element('tag name','iframe'))
+   try:driver.find_element('id','reload').click()
+   except Exception as e:print('RELOAD_EXCEPTION '+str(e).splitlines()[0],flush=True)
+   driver.switch_to.default_content()
    try:WebDriverWait(driver,3).until(lambda d:d.execute_script('return window.messages.filter(x=>x.type==="load").length')>1)
    except:pass
   messages=driver.execute_script('return window.messages');row={'sandbox':sandbox,'name':name,'reloaded':sum(x['type']=='load' for x in messages)>1,'messages':messages};rows.append(row);print(json.dumps(row),flush=True)
