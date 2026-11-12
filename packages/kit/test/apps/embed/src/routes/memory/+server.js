@@ -105,6 +105,10 @@ export function GET({ url }) {
 				if (config.sandbox) frame.setAttribute('sandbox', 'allow-scripts allow-forms');
 				frame.srcdoc = html;
 			}
+			if (config.transport === 'blob') {
+				if (config.sandbox) frame.setAttribute('sandbox', 'allow-scripts allow-forms');
+				frame.src = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+			}
 			if (config.transport === 'data') {
 				frame.src = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
 			}

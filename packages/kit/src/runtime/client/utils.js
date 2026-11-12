@@ -32,7 +32,7 @@ export function resolve_url(url) {
 	} catch (error) {
 		if (
 			(memory_routing || opaque_hash_routing) &&
-			(initial_url.protocol === 'about:' || initial_url.protocol === 'data:')
+			(initial_url.protocol === 'about:' || initial_url.protocol === 'data:' || initial_url.protocol === 'blob:')
 		) {
 			throw new Error(
 				'Cannot resolve a relative URL in an embedded document without a usable HTTP(S) base URL. Provide a <base href> or use an absolute URL.',

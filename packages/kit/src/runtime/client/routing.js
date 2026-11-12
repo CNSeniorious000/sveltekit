@@ -9,11 +9,11 @@ import { page } from '#app/state/client';
 export const memory_routing =
 	__SVELTEKIT_INLINE__ &&
 	!__SVELTEKIT_HASH_ROUTING__ &&
-	(location.protocol === 'about:' || location.protocol === 'data:');
+	(location.protocol === 'about:' || location.protocol === 'data:' || location.protocol === 'blob:');
 
 // Hash routes can use the browser's existing fragment history in these documents.
 export const opaque_hash_routing =
-	__SVELTEKIT_HASH_ROUTING__ && (location.protocol === 'about:' || location.protocol === 'data:');
+	__SVELTEKIT_HASH_ROUTING__ && (location.protocol === 'about:' || location.protocol === 'data:' || location.protocol === 'blob:');
 
 /**
  * Keep the source route without adopting a prerender placeholder origin. The
@@ -44,7 +44,7 @@ if (memory_routing) set_client_origin(initial_url.origin);
 /** Read the existing browser history entry, without a separate history stack. */
 export function current_url() {
 	// Without an HTTP base, fragment navigation uses the actual document URL.
-	if (!memory_routing || initial_url.origin === 'null') return new URL(location.href);
+	if (!memory_routing || !['http:', 'https:'].includes(initial_url.protocol)) return new URL(location.href);
 
 	const retained = history.state?.[HISTORY_METADATA_KEY]?.url;
 	if (retained) return new URL(retained);

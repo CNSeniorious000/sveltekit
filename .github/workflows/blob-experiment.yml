@@ -1,0 +1,29 @@
+name: Kit blob experiment
+on:
+  push:
+    branches: [diagnose/13226-blob-embedding]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    env:
+      KIT_E2E_BROWSER: ${{ matrix.browser }}
+      KIT_E2E_VARIANT: memory
+      KIT_E2E_PROJECT: js
+      KIT_E2E_WORKERS: 2
+      KIT_E2E_RETRIES: 0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/node-setup
+      - run: pnpm playwright install --with-deps ${{ matrix.browser }}
+      - run: pnpm run sync-all
+      - working-directory: packages/kit/test/apps/embed
+        run: pnpm exec playwright test test/blob.test.js

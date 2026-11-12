@@ -1025,7 +1025,7 @@ async function get_navigation_result_from_branch({
 
 	// An opaque document has no route pathname to normalize. In WebKit, writing
 	// it can turn about:srcdoc into about:/srcdoc, which history cannot commit.
-	if (url.protocol !== 'about:' && url.protocol !== 'data:') {
+	if (url.protocol !== 'about:' && url.protocol !== 'data:' && url.protocol !== 'blob:') {
 		url.pathname = normalize_path(url.pathname, slash);
 		// eslint-disable-next-line no-self-assign
 		url.search = url.search; // turn `/?` into `/`
@@ -1316,7 +1316,7 @@ function resolve_route_url(input, url) {
 	} catch (error) {
 		if (
 			(memory_routing || opaque_hash_routing) &&
-			(url.protocol === 'about:' || url.protocol === 'data:')
+			(url.protocol === 'about:' || url.protocol === 'data:' || url.protocol === 'blob:')
 		) {
 			throw new Error(
 				'Cannot resolve a relative URL in an embedded document without a usable HTTP(S) base URL. Provide a <base href> or use an absolute URL.',
@@ -1885,7 +1885,7 @@ export async function get_navigation_intent(url, invalidating) {
 	if (
 		memory_routing &&
 		invalidating &&
-		(url.protocol === 'about:' || url.protocol === 'data:') &&
+		(url.protocol === 'about:' || url.protocol === 'data:' || url.protocol === 'blob:') &&
 		url.href === current.url?.href &&
 		current.route
 	) {
@@ -2195,7 +2195,7 @@ async function navigate({
 	// ensure the url pathname matches the page's trailing slash option
 	if (
 		url.protocol !== 'about:' &&
-		url.protocol !== 'data:' &&
+		url.protocol !== 'data:' && url.protocol !== 'blob:' &&
 		navigation_result.props.page.url.pathname !== url.pathname
 	) {
 		url.pathname = navigation_result.props.page.url.pathname;
@@ -3798,7 +3798,7 @@ async function _hydrate(
  * @returns {Promise<import('types').ServerNodesResponse | import('types').ServerRedirectNode>}
  */
 async function load_data(url, invalid) {
-	if (memory_routing && (url.protocol === 'about:' || url.protocol === 'data:')) {
+	if (memory_routing && (url.protocol === 'about:' || url.protocol === 'data:' || url.protocol === 'blob:')) {
 		throw new Error(
 			'Loading server data in an embedded document requires a usable HTTP(S) base URL.'
 		);
