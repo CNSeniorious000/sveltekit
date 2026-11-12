@@ -1,0 +1,30 @@
+name: Kit non-initial blank diagnostic
+on:
+  push:
+    branches: [diagnostic/13226-blank-history]
+permissions:
+  contents: read
+jobs:
+  embed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    env:
+      KIT_E2E_BROWSER: ${{ matrix.browser }}
+      KIT_E2E_WORKERS: 3
+      KIT_E2E_PROJECT: js
+      KIT_E2E_VARIANT: memory
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/node-setup
+      - run: pnpm playwright install --with-deps ${{ matrix.browser }}
+      - run: pnpm run sync-all
+      - run: pnpm --filter=test-embed pw:build
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kit-blank-${{ matrix.browser }}
+          path: packages/kit/test/apps/embed/test-results

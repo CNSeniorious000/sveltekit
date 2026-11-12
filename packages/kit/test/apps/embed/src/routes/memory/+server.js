@@ -109,8 +109,13 @@ export function GET({ url }) {
 				frame.src = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
 			}
 			if (config.transport === 'blank') {
-				frame.src = 'about:blank';
+				frame.srcdoc = '<!doctype html><body>Initialize document</body>';
 				frame.onload = () => {
+					if (frame.hasAttribute('srcdoc')) {
+						frame.removeAttribute('srcdoc');
+						frame.src = 'about:blank';
+						return;
+					}
 					frame.onload = null;
 					// Start a new task in the iframe realm. Synchronous insertion can retain the parent entry settings.
 					const script = frame.contentDocument.createElement('script');

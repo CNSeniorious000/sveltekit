@@ -100,8 +100,13 @@ async function retains_written_document(page) {
 		await control.evaluate(() => {
 			const iframe = document.createElement('iframe');
 			iframe.dataset.testid = 'history-control';
-			iframe.src = 'about:blank';
+			iframe.srcdoc = '<!doctype html><body>Initialize document</body>';
 			iframe.onload = () => {
+				if (iframe.hasAttribute('srcdoc')) {
+					iframe.removeAttribute('srcdoc');
+					iframe.src = 'about:blank';
+					return;
+				}
 				iframe.onload = null;
 				const doc = /** @type {Document} */ (iframe.contentDocument);
 				const script = doc.createElement('script');
@@ -149,6 +154,7 @@ async function retains_written_document(page) {
  */
 export async function back(page, frame, transport) {
 	const behavior = transport !== 'blank' ? 'retained' : await retains_written_document(page);
+	expect(behavior).toBe('retained');
 	await frame.evaluate(() => history.back());
 	if (behavior === 'retained') return true;
 	test.info().annotations.push({
@@ -189,8 +195,13 @@ export async function blank_history_delta(page, operation, after_navigation) {
 			({ operation, after_navigation }) => {
 				const iframe = document.createElement('iframe');
 				iframe.dataset.testid = 'fragment-control';
-				iframe.src = 'about:blank';
+				iframe.srcdoc = '<!doctype html><body>Initialize document</body>';
 				iframe.onload = () => {
+				if (iframe.hasAttribute('srcdoc')) {
+					iframe.removeAttribute('srcdoc');
+					iframe.src = 'about:blank';
+					return;
+				}
 					iframe.onload = null;
 					const doc = /** @type {Document} */ (iframe.contentDocument);
 					const script = doc.createElement('script');
