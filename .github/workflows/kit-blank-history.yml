@@ -27,7 +27,7 @@ jobs:
       - uses: ./.github/actions/node-setup
       - run: pnpm playwright install --with-deps ${{ matrix.browser }}
       - run: pnpm run sync-all
-      - run: pnpm --filter=test-embed pw:build test/memory.test.js test/memory-forms.test.js --grep blank --repeat-each 3
+      - run: pnpm --filter=test-embed pw:build test/memory.test.js test/memory-forms.test.js --grep blank --repeat-each 3 --retries=0
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -402,7 +402,9 @@ test.describe('inline routing in about/data documents', () => {
 				expect(new URL(destination).hash).toBe('#base-anchor');
 				const document_url = await frame.evaluate(() => location.href);
 				await link.click();
-				await expect.poll(() => frame.evaluate(() => location.href)).toBe(destination);
+				await expect
+					.poll(() => frame.evaluate(() => location.href).catch(() => null))
+					.toBe(destination);
 				if (destination.split('#')[0] !== document_url.split('#')[0]) {
 					// The effective base names a different document. This is a native document
 					// navigation, not a fragment of the logical route or original srcdoc.
