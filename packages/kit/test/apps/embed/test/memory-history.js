@@ -1,8 +1,8 @@
-import { expect } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
 /** @typedef {import('@playwright/test').Page} Page */
 /** @typedef {import('@playwright/test').Frame} Frame */
-/** @type {WeakMap<Page, boolean>} */
+/** @type {WeakMap<Page, 'retained' | 'discarded' | 'host-navigation'>} */
 const retained = new WeakMap();
 
 /** Observe from Node: WebKit may navigate the host, destroying DOM observers.
@@ -34,6 +34,7 @@ export async function observe_history(page, frame) {
 	`
 	});
 	await frame.getByTestId('native-history-push').click();
+	/** @type {{ native: number, length: number, state: { native: number } }[]} */
 	const pushes = JSON.parse(
 		/** @type {string} */ (await frame.getByTestId('native-history-steps').textContent())
 	);
@@ -71,6 +72,13 @@ async function retains_written_document(page) {
 	if (retained.has(page)) return retained.get(page);
 	const control = await page.context().newPage();
 	try {
+		// No Kit siblings: iframe histories contribute to the same joint history.
+		await control.route(page.url(), (route) =>
+			route.fulfill({
+				contentType: 'text/html',
+				body: '<!doctype html><body>Native control</body>'
+			})
+		);
 		await control.goto(page.url());
 		await control.evaluate(() => {
 			const iframe = document.createElement('iframe');
@@ -94,13 +102,26 @@ async function retains_written_document(page) {
 		if (!frame) throw new Error('Missing native history frame');
 		const observation = await observe_history(control, frame);
 		console.log('Native history capability:', JSON.stringify(observation));
-		expect(observation.host_after).toBe(observation.host);
+		// WebKit can replace the initial about:blank history entry instead of
+		// appending. Compare Kit with that same native limitation below.
+		if (observation.host_after !== observation.host) {
+			expect(observation.host_after).toBe('about:blank');
+			expect(observation.pushes.map((step) => step.state)).toEqual([
+				{ native: 0 },
+				{ native: 1 },
+				{ native: 2 }
+			]);
+			expect(new Set(observation.pushes.map((step) => step.length)).size).toBe(1);
+			retained.set(page, 'host-navigation');
+			return 'host-navigation';
+		}
 		const result = observation.document;
 		if ('error' in result) throw new Error(result.error);
 		expect(result.href).toBe('about:blank');
 		expect(result.state).toEqual({ native: 1 });
-		retained.set(page, result.retained);
-		return result.retained;
+		const behavior = result.retained ? 'retained' : 'discarded';
+		retained.set(page, behavior);
+		return behavior;
 	} finally {
 		await control.close();
 	}
@@ -110,11 +131,78 @@ async function retains_written_document(page) {
  * @param {Page} page @param {Frame} frame @param {string} transport
  */
 export async function back(page, frame, transport) {
-	const keeps_document = transport !== 'blank' || (await retains_written_document(page));
+	const behavior = transport !== 'blank' ? 'retained' : await retains_written_document(page);
 	await frame.evaluate(() => history.back());
-	if (keeps_document) return true;
+	if (behavior === 'retained') return true;
+	test.info().annotations.push({
+		type: 'native-history-boundary',
+		description:
+			behavior === 'host-navigation'
+				? 'Back leaves the host in both native and Kit documents; document persistence was not verified'
+				: 'Back discards the written document in both native and Kit documents; document persistence was not verified'
+	});
+	if (behavior === 'host-navigation') {
+		await expect(page).toHaveURL('about:blank');
+		await expect(page.locator('body')).toBeEmpty();
+		return false;
+	}
 	await expect(frame.locator('body')).toBeEmpty();
 	expect(await frame.evaluate(() => location.href)).toBe('about:blank');
 	await expect(frame.getByTestId('runtime')).toHaveCount(0);
 	return false;
+}
+
+/** Match the same fragment operation in a document with no Kit runtime.
+ * @param {Page} page
+ * @param {boolean} after_navigation
+ */
+export async function blank_fragment_history_delta(page, after_navigation) {
+	const control = await page.context().newPage();
+	try {
+		// No Kit siblings: iframe histories contribute to the same joint history.
+		await control.route(page.url(), (route) =>
+			route.fulfill({
+				contentType: 'text/html',
+				body: '<!doctype html><body>Native control</body>'
+			})
+		);
+		await control.goto(page.url());
+		await control.evaluate((after_navigation) => {
+			const iframe = document.createElement('iframe');
+			iframe.dataset.testid = 'fragment-control';
+			iframe.src = 'about:blank';
+			iframe.onload = () => {
+				iframe.onload = null;
+				const doc = /** @type {Document} */ (iframe.contentDocument);
+				const script = doc.createElement('script');
+				const html = `<body data-native-written=true><a id="anchor" href="about:blank#anchor">Anchor</a></body>`;
+				script.textContent = `setTimeout(() => {
+					document.open(); document.write(${JSON.stringify(html)}); document.close();
+					history.replaceState({ native: 0 }, '');
+					if (${after_navigation}) history.pushState({ native: 1 }, '');
+				}, 0);`;
+				doc.body.append(script);
+			};
+			document.body.append(iframe);
+		}, after_navigation);
+		await expect(
+			control.frameLocator('[data-testid="fragment-control"]').locator('body')
+		).toHaveAttribute('data-native-written', 'true');
+		const element = await control.getByTestId('fragment-control').elementHandle();
+		const frame = await element?.contentFrame();
+		if (!frame) throw new Error('Missing native fragment frame');
+		const before = await frame.evaluate(() => history.length);
+		await frame.locator('#anchor').click();
+		await expect.poll(() => frame.evaluate(() => location.href)).toBe('about:blank#anchor');
+		const after = await frame.evaluate(() => history.length);
+		const delta = after - before;
+		expect([0, 1]).toContain(delta);
+		console.log(
+			'Native blank fragment history:',
+			JSON.stringify({ after_navigation, before, after, delta })
+		);
+		return delta;
+	} finally {
+		await control.close();
+	}
 }

@@ -1,5 +1,5 @@
 import process from 'node:process';
-import { back } from './memory-history.js';
+import { back, blank_fragment_history_delta } from './memory-history.js';
 import { expect } from '@playwright/test';
 import { test, variant } from '../../../utils.js';
 
@@ -424,6 +424,7 @@ test.describe('inline routing in about/data documents', () => {
 					const frame = await mount(page, { transport, simple: '', base: 'opaque' });
 					const href = transport === 'blank' ? 'about:blank' : 'about:srcdoc';
 					const length = await frame.evaluate(() => history.length);
+					const delta = transport === 'blank' ? await blank_fragment_history_delta(page, false) : 1;
 					await frame.getByTestId('counter').click();
 					await expect(frame.getByTestId('counter')).toHaveText('Count: 1');
 					await expect(frame.getByTestId('native-anchor')).toHaveAttribute(
@@ -433,7 +434,7 @@ test.describe('inline routing in about/data documents', () => {
 					await frame.getByTestId('native-anchor').click();
 					await expect.poll(() => frame.evaluate(() => location.href)).toBe(`${href}#anchor`);
 					await expect(frame.getByTestId('page-url')).toHaveText(`${href}#anchor`);
-					expect(await frame.evaluate(() => history.length)).toBe(length + 1);
+					expect(await frame.evaluate(() => history.length)).toBe(length + delta);
 					await expect
 						.poll(() =>
 							frame.evaluate(() =>
@@ -445,7 +446,7 @@ test.describe('inline routing in about/data documents', () => {
 					await frame.getByTestId('native-anchor-replace').click();
 					await expect.poll(() => frame.evaluate(() => location.href)).toBe(`${href}#replacement`);
 					await expect(frame.getByTestId('page-url')).toHaveText(`${href}#replacement`);
-					expect(await frame.evaluate(() => history.length)).toBe(length + 1);
+					expect(await frame.evaluate(() => history.length)).toBe(length + delta);
 					if (transport === 'srcdoc') {
 						await frame.getByTestId('history-back').click();
 						await expect.poll(() => frame.evaluate(() => location.href)).toBe(href);
@@ -482,6 +483,7 @@ test.describe('inline routing in about/data documents', () => {
 					const logical = /** @type {string} */ (await frame.getByTestId('page-url').textContent());
 					expect(new URL(logical).pathname).not.toBe(new URL(document_base).pathname);
 					const length = await frame.evaluate(() => history.length);
+					const delta = transport === 'blank' ? await blank_fragment_history_delta(page, true) : 1;
 					const index = await frame.evaluate(
 						() => history.state['sveltekit:metadata'].historyIndex
 					);
@@ -511,7 +513,7 @@ test.describe('inline routing in about/data documents', () => {
 					for (let click = 0; click < 2; click += 1) {
 						await frame.getByTestId(id).click();
 						await expect_fragment('#anchor', index + 1);
-						expect(await frame.evaluate(() => history.length)).toBe(length + 1);
+						expect(await frame.evaluate(() => history.length)).toBe(length + delta);
 						if (opt_out) {
 							navigations.push({ willUnload: false, toUrl: `${href}#anchor`, type: 'link' });
 						}
@@ -531,7 +533,7 @@ test.describe('inline routing in about/data documents', () => {
 
 					await frame.getByTestId('document-anchor-replace').click();
 					await expect_fragment('#replacement', index + 1);
-					expect(await frame.evaluate(() => history.length)).toBe(length + 1);
+					expect(await frame.evaluate(() => history.length)).toBe(length + delta);
 					if (transport === 'srcdoc') {
 						await frame.getByTestId('back').click();
 						await expect_fragment('', index);
@@ -886,9 +888,12 @@ test.describe('inline routing in about/data documents', () => {
 				await expect(first.getByTestId('state')).toHaveText('{}');
 				await expect_route(first, 'next');
 				const second_retained = await back(page, second, transport);
+				// back() already verified a whole-host departure against the native control.
+				if (!second_retained && page.url() === 'about:blank') return;
 				if (second_retained) await expect(second.getByTestId('state')).toHaveText('{}');
 				await expect_route(first, 'next');
 				if (await back(page, first, transport)) await expect_route(first, 'alpha');
+				if (page.url() === 'about:blank') return;
 				if (second_retained) await expect_route(second, 'alpha');
 				await expect_document(first, transport);
 				await expect_document(second, transport);
