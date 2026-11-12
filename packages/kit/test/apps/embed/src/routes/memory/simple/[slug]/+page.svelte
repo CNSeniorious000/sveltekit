@@ -1,7 +1,7 @@
 <script>
 	import { browser } from '$app/env';
 	import { page } from '$app/state';
-	import { invalidate } from '$app/navigation';
+	import { invalidate, pushState } from '$app/navigation';
 
 	let { data } = $props();
 	let count = $state(0);
@@ -19,6 +19,10 @@
 <p data-testid="load-url">{data.load_url}</p>
 <button data-testid="refresh" onclick={() => invalidate('app:refresh')}>Refresh load</button>
 <button data-testid="counter" onclick={() => count++}>Count: {count}</button>
+
+<button data-testid="push-one" onclick={() => pushState('', { modal: 'one' })}>Push one</button>
+<button data-testid="push-two" onclick={() => pushState('', { modal: 'two' })}>Push two</button>
+<p data-testid="state">{JSON.stringify(page.state)}</p>
 
 <nav aria-label="Native fragment navigation">
 	<a data-testid="document-base-anchor" href="#base-anchor">Document-base anchor</a>
