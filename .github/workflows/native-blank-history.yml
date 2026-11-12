@@ -1,0 +1,28 @@
+name: Native blank history diagnostic
+on:
+  push:
+    branches: [diagnostic/13226-blank-history]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: |
+          mkdir -p /tmp/native-history-probe
+          cp diagnostics/blank-history.cjs /tmp/native-history-probe/
+          cd /tmp/native-history-probe
+          npm init -y
+          npm install playwright@1.62.1
+          npx playwright install --with-deps chromium firefox webkit
+          node blank-history.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-history-results
+          path: /tmp/native-history-probe/results.json
