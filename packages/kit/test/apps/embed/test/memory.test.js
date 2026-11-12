@@ -14,8 +14,8 @@ test.describe.configure({ mode: 'parallel' });
 async function mount(page, options = {}) {
 	await page.goto(`/app/memory?${new URLSearchParams(options)}`);
 	await expect(page.getByTestId('host-status')).toHaveText('ready');
+	await expect.poll(() => page.frame({ name: 'memory-1' }) !== null).toBe(true);
 	const frame = page.frame({ name: 'memory-1' });
-	expect(frame).not.toBeNull();
 	await expect(/** @type {Frame} */ (frame).getByTestId('runtime')).toHaveText('browser');
 	await expect(/** @type {Frame} */ (frame).locator('body')).toHaveClass('started');
 	return /** @type {Frame} */ (frame);
@@ -47,6 +47,74 @@ async function expect_document(frame, transport) {
 	if (transport === 'data') expect(expected).toMatch(/^data:text\/html;charset=utf-8,/);
 	expect(frame.url()).toBe(expected);
 	expect(await frame.evaluate(() => location.href)).toBe(expected);
+}
+
+test.afterEach(async ({ page }, test_info) => {
+	if (test_info.status === test_info.expectedStatus || !test_info.title.includes('reload')) return;
+	const diagnostics = {
+		frames: page.frames().map((frame) => ({ name: frame.name(), url: frame.url() })),
+		documents: await page.evaluate(() =>
+			Array.from(document.querySelectorAll('iframe'), (iframe) => {
+				try {
+					const doc = iframe.contentDocument;
+					return {
+						name: iframe.name,
+						src: iframe.src,
+						srcdoc_length: iframe.srcdoc.length,
+						url: doc?.URL,
+						ready: doc?.readyState,
+						body: doc?.body?.innerText.slice(0, 1500),
+						counter: doc?.querySelector('[data-testid="counter"]')?.textContent
+					};
+				} catch (error) {
+					return { name: iframe.name, error: String(error) };
+				}
+			})
+		)
+	};
+	console.log('inline reload diagnostics', JSON.stringify(diagnostics));
+	await test_info.attach('inline-reload-diagnostics', {
+		body: JSON.stringify(diagnostics, null, 2),
+		contentType: 'application/json'
+	});
+});
+
+for (const sandbox of [false, true]) {
+	test(`native srcdoc reload control${sandbox ? ' in an opaque sandbox' : ''}`, async ({
+		page,
+		javaScriptEnabled
+	}) => {
+		test.skip(!javaScriptEnabled, 'The native control uses iframe scripts');
+		await page.route('**/app/native-reload-control', (route) =>
+			route.fulfill({ contentType: 'text/html', body: '<!doctype html><body></body>' })
+		);
+		await page.goto('/app/native-reload-control');
+		await page.evaluate((sandbox) => {
+			const iframe = document.createElement('iframe');
+			iframe.name = 'native-reload';
+			if (sandbox) iframe.setAttribute('sandbox', 'allow-scripts');
+			iframe.srcdoc =
+				'<!doctype html><body><p data-testid="counter">Count: 0</p><script>document.body.dataset.run = Math.random().toString()</' +
+				'script>';
+			document.body.append(iframe);
+		}, sandbox);
+		await expect.poll(() => page.frame({ name: 'native-reload' })).not.toBeNull();
+		const frame = /** @type {Frame} */ (page.frame({ name: 'native-reload' }));
+		await expect(frame.getByTestId('counter')).toHaveText('Count: 0');
+		await expect(frame.locator('body')).toHaveAttribute('data-run', /.+/);
+		const run = await frame.locator('body').getAttribute('data-run');
+		await frame.evaluate(() => {
+			/** @type {HTMLElement} */ (document.querySelector('[data-testid="counter"]')).textContent =
+				'Count: 1';
+		});
+		await expect(frame.getByTestId('counter')).toHaveText('Count: 1');
+		await frame.evaluate(() => location.reload());
+		await expect(frame.getByTestId('counter')).toHaveText('Count: 0');
+		await expect(frame.locator('body')).not.toHaveAttribute(
+			'data-run',
+			/** @type {string} */ (run)
+		);
+	});
 }
 
 test.describe('inline routing in about/data documents', () => {
@@ -557,6 +625,9 @@ test.describe('inline routing in about/data documents', () => {
 
 			test('scrolls to anchors and restores scroll after history traversal', async ({ page }) => {
 				const frame = await mount(page, { transport });
+				// The diagnostic log grows in beforeNavigate. Test Kit's saved scroll,
+				// without the browser independently anchoring that changing layout.
+				await frame.addStyleTag({ content: 'html { overflow-anchor: none; }' });
 				await frame.getByTestId('anchor-link').click();
 				await expect(frame.getByTestId('page-url')).toContainText('#anchor');
 				await expect
@@ -596,7 +667,8 @@ test.describe('inline routing in about/data documents', () => {
 
 			for (const control of ['relative-link', 'relative-goto', 'relative-get-form']) {
 				test(`${control} preserves the explicit base pathname`, async ({ page }) => {
-					const frame = await mount(page, { transport, base: 'alternate' });
+					// Remove the SSR max-age cache so this case exercises a network URL.
+					const frame = await mount(page, { transport, base: 'alternate', cache: 'miss' });
 					await expect_route(frame, 'alpha');
 					await frame.getByTestId(control).click();
 					await expect(frame.getByTestId('route-id')).toHaveText('/memory/client/[slug]');

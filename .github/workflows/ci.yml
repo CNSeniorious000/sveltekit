@@ -119,12 +119,31 @@ jobs:
           - { script: test:cross-platform:build, browser: firefox }
           - { script: test:cross-platform:dev, os: macOS-latest, browser: webkit, workers: 3 }
           - { script: test:cross-platform:build, os: macOS-latest, browser: webkit, workers: 3 }
-          # inline about/data documents and their ordinary HTTP controls. Chromium is
-          # already covered by test:build:rest; each app's test:build runs both variants.
-          - { app: 'embed hash-based-routing', script: test:build, browser: firefox, project: js }
+          # Keep inline fixtures independent so one failure does not prevent testing
+          # the other router. The rest legs retain their ordinary HTTP controls.
+          - { app: embed, script: pw:build, variant: memory, project: js }
+          - { app: hash-based-routing, script: pw:build, variant: inline, project: js }
+          - { app: embed, script: pw:build, variant: memory, browser: firefox, project: js }
           - {
-              app: 'embed hash-based-routing',
-              script: test:build,
+              app: hash-based-routing,
+              script: pw:build,
+              variant: inline,
+              browser: firefox,
+              project: js
+            }
+          - {
+              app: embed,
+              script: pw:build,
+              variant: memory,
+              os: macOS-latest,
+              browser: webkit,
+              project: js,
+              workers: 3
+            }
+          - {
+              app: hash-based-routing,
+              script: pw:build,
+              variant: inline,
               os: macOS-latest,
               browser: webkit,
               project: js,

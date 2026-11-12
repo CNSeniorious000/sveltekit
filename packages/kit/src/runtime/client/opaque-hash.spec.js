@@ -30,6 +30,12 @@ beforeEach(() => {
 	window.fetch = native_fetch;
 	document.head.innerHTML = '';
 	document.body.innerHTML = '';
+	// Vitest exposes the host Node URL on the main window. A fresh DOM window
+	// supplies the browser URL parser, independent of the Node version.
+	const frame = document.createElement('iframe');
+	document.body.append(frame);
+	vi.stubGlobal('URL', /** @type {typeof window} */ (frame.contentWindow).URL);
+	frame.remove();
 	// JSDOM does not expose this constructor. HTML anchors must take the HTML branch.
 	vi.stubGlobal('SVGAElement', class {});
 });
