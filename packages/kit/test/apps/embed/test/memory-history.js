@@ -49,18 +49,35 @@ export async function observe_history(page, frame) {
 			.getByTestId('native-history-back')
 			.click()
 			.catch(() => {});
-		// Observation window, not a success condition. Assertions below still require traversal.
-		await new Promise((resolve) => setTimeout(resolve, 1000));
-		const snapshot = await frame
-			.evaluate(() => ({
-				href: location.href,
-				state: history.state,
-				retained:
-					!!document.body?.dataset.nativeWritten ||
-					document.documentElement.dataset.nativeReady === 'true',
-				body: document.body?.textContent
-			}))
-			.catch((error) => ({ error: String(error) }));
+		// A detached child can precede the host's navigation event. Wait for the
+		// actual traversal outcome instead of sampling after an arbitrary delay.
+		const capture = () =>
+			frame
+				.evaluate(() => ({
+					href: location.href,
+					state: history.state,
+					ready: document.readyState,
+					retained:
+						!!document.body?.dataset.nativeWritten ||
+						document.documentElement.dataset.nativeReady === 'true',
+					body: document.body?.textContent
+				}))
+				.catch((error) => ({ error: String(error) }));
+		let snapshot = await capture();
+		await expect
+			.poll(
+				async () => {
+					snapshot = await capture();
+					return (
+						page.url() !== host ||
+						(!('error' in snapshot) &&
+							snapshot.state?.native === 1 &&
+							snapshot.ready === 'complete')
+					);
+				},
+				{ timeout: 10_000 }
+			)
+			.toBe(true);
 		return { host, host_after: page.url(), pushes, navigations, document: snapshot };
 	} finally {
 		page.off('framenavigated', record);
