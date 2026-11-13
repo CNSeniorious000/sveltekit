@@ -303,6 +303,31 @@ test.describe('inline routing in about/data documents', () => {
 
 	for (const transport of ['srcdoc', 'blank', 'data']) {
 		test.describe(transport, () => {
+			for (const operation of [
+				'push-one',
+				'replace-current',
+				'goto-current',
+				'replace-after-anchor'
+			]) {
+				test(`baseless shallow state ${operation}`, async ({ page }) => {
+					test.skip(!!process.env.DEV, 'Requires an inline production bundle');
+					const frame = await mount(page, { transport, simple: '', base: 'opaque' });
+					if (operation === 'replace-after-anchor') {
+						await frame.getByTestId('native-anchor').click();
+						await expect(frame.getByTestId('page-url')).toHaveText(/#anchor$/);
+					}
+					await frame
+						.getByTestId(operation === 'replace-after-anchor' ? 'replace-current' : operation)
+						.click();
+					await expect(frame.getByTestId('state')).toHaveText(
+						JSON.stringify({
+							modal:
+								operation === 'push-one' ? 'one' : operation === 'goto-current' ? 'goto' : 'replace'
+						})
+					);
+					await expect(frame.getByTestId('route-id')).toHaveText('/memory/simple/[slug]');
+				});
+			}
 			test('hydrates and invalidates a self-contained SSR route without an HTTP document base', async ({
 				page
 			}) => {

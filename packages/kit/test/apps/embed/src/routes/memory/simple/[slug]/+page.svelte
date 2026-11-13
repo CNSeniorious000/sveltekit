@@ -1,7 +1,7 @@
 <script>
 	import { browser } from '$app/env';
 	import { page } from '$app/state';
-	import { invalidate, pushState } from '$app/navigation';
+	import { invalidate, pushState, replaceState, goto } from '$app/navigation';
 
 	let { data } = $props();
 	let count = $state(0);
@@ -22,6 +22,15 @@
 
 <button data-testid="push-one" onclick={() => pushState('', { modal: 'one' })}>Push one</button>
 <button data-testid="push-two" onclick={() => pushState('', { modal: 'two' })}>Push two</button>
+<button
+	data-testid="replace-current"
+	onclick={() => replaceState(new URL(location.href), { modal: 'replace' })}>Replace current</button
+>
+<button
+	data-testid="goto-current"
+	onclick={() => goto(new URL(location.href), { shallow: true, state: { modal: 'goto' } })}
+	>Goto current</button
+>
 <p data-testid="state">{JSON.stringify(page.state)}</p>
 
 <nav aria-label="Native fragment navigation">

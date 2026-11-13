@@ -2704,9 +2704,32 @@ let warned_on_replace_state_function = false;
 /**
  * @param {string | URL} url
  * @param {'goto' | 'pushState' | 'replaceState'} caller
+ * @param {boolean} shallow
  */
-async function resolve_intent(url, caller) {
-	const resolved = new URL(resolve_url(url));
+async function resolve_intent(url, caller, shallow) {
+	const resolved = new URL(
+		shallow && memory_routing && initial_url.origin === 'null' && url === ''
+			? current_url()
+			: resolve_url(url)
+	);
+
+	// A baseless inline document already knows its hydrated route. Updating state
+	// for that exact document does not require resolving an HTTP pathname.
+	if (
+		shallow &&
+		memory_routing &&
+		initial_url.origin === 'null' &&
+		resolved.href === current.url?.href &&
+		current.route
+	) {
+		return {
+			id: get_page_key(resolved),
+			invalidating: false,
+			route: current.route,
+			params: current.params ?? {},
+			url: resolved
+		};
+	}
 
 	if (resolved.origin !== origin) {
 		e.navigation_external_url({ caller, url: String(url) });
@@ -2748,7 +2771,7 @@ export async function goto(url, opts = {}) {
 
 	const replace = opts.replace ?? opts.replaceState ?? false;
 
-	const intent = await resolve_intent(url, 'goto');
+	const intent = await resolve_intent(url, 'goto', !!opts.shallow);
 
 	if (opts.shallow) {
 		return update_state(
@@ -2963,7 +2986,7 @@ export async function pushState(url, state) {
 		w.push_state_deprecated();
 	}
 
-	const intent = await resolve_intent(url, 'pushState');
+	const intent = await resolve_intent(url, 'pushState', true);
 
 	await update_state(
 		intent,
@@ -2987,7 +3010,7 @@ export async function replaceState(url, state) {
 		w.replace_state_deprecated();
 	}
 
-	const intent = await resolve_intent(url, 'replaceState');
+	const intent = await resolve_intent(url, 'replaceState', true);
 
 	await update_state(
 		intent,
