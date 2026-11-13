@@ -303,6 +303,15 @@ test.describe('inline routing in about/data documents', () => {
 
 	for (const transport of ['srcdoc', 'blank', 'data']) {
 		test.describe(transport, () => {
+			for (const operation of ['push-one', 'replace-current']) {
+				test(`baseless shallow state ${operation}`, async ({ page }) => {
+					test.skip(!!process.env.DEV, 'Requires an inline production bundle');
+					const frame = await mount(page, { transport, simple: '', base: 'opaque' });
+					await frame.getByTestId(operation).click();
+					await expect(frame.getByTestId('state')).toHaveText(JSON.stringify({ modal: operation === 'push-one' ? 'one' : 'replace' }));
+					await expect(frame.getByTestId('route-id')).toHaveText('/memory/simple/[slug]');
+				});
+			}
 			test('hydrates and invalidates a self-contained SSR route without an HTTP document base', async ({
 				page
 			}) => {

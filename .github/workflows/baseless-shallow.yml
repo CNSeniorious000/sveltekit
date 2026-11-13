@@ -1,0 +1,28 @@
+name: Baseless shallow regression
+on:
+  push:
+    branches: [diagnose/13226-baseless-shallow]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/node-setup
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run sync-all
+      - run: pnpm exec playwright install --with-deps ${{ matrix.browser == 'chromium' && 'chrome' || matrix.browser }}
+      - run: pnpm exec playwright test --grep 'baseless shallow state' --retries=0
+        working-directory: packages/kit/test/apps/embed
+        env:
+          KIT_E2E_VARIANT: memory
+          KIT_E2E_PROJECT: js
+          KIT_E2E_BROWSER: ${{ matrix.browser }}
