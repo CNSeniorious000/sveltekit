@@ -1,7 +1,7 @@
 <script>
 	import { browser } from '$app/env';
 	import { page } from '$app/state';
-	import { invalidate, pushState, replaceState } from '$app/navigation';
+	import { invalidate, pushState, replaceState, goto } from '$app/navigation';
 
 	let { data } = $props();
 	let count = $state(0);
@@ -25,6 +25,11 @@
 <button
 	data-testid="replace-current"
 	onclick={() => replaceState(new URL(location.href), { modal: 'replace' })}>Replace current</button
+>
+<button
+	data-testid="goto-current"
+	onclick={() => goto(new URL(location.href), { shallow: true, state: { modal: 'goto' } })}
+	>Goto current</button
 >
 <p data-testid="state">{JSON.stringify(page.state)}</p>
 
