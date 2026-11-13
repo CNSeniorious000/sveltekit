@@ -308,7 +308,9 @@ test.describe('inline routing in about/data documents', () => {
 					test.skip(!!process.env.DEV, 'Requires an inline production bundle');
 					const frame = await mount(page, { transport, simple: '', base: 'opaque' });
 					await frame.getByTestId(operation).click();
-					await expect(frame.getByTestId('state')).toHaveText(JSON.stringify({ modal: operation === 'push-one' ? 'one' : 'replace' }));
+					await expect(frame.getByTestId('state')).toHaveText(
+						JSON.stringify({ modal: operation === 'push-one' ? 'one' : 'replace' })
+					);
 					await expect(frame.getByTestId('route-id')).toHaveText('/memory/simple/[slug]');
 				});
 			}

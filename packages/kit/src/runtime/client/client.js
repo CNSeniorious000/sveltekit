@@ -2706,7 +2706,26 @@ let warned_on_replace_state_function = false;
  * @param {'goto' | 'pushState' | 'replaceState'} caller
  */
 async function resolve_intent(url, caller) {
-	const resolved = new URL(resolve_url(url));
+	const resolved = new URL(
+		memory_routing && initial_url.origin === 'null' && url === '' ? current_url() : resolve_url(url)
+	);
+
+	// A baseless inline document already knows its hydrated route. Updating state
+	// for that exact document does not require resolving an HTTP pathname.
+	if (
+		memory_routing &&
+		initial_url.origin === 'null' &&
+		resolved.href === current.url?.href &&
+		current.route
+	) {
+		return {
+			id: get_page_key(resolved),
+			invalidating: false,
+			route: current.route,
+			params: current.params ?? {},
+			url: resolved
+		};
+	}
 
 	if (resolved.origin !== origin) {
 		e.navigation_external_url({ caller, url: String(url) });

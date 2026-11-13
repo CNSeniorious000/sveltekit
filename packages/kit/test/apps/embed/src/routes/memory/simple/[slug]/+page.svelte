@@ -22,7 +22,10 @@
 
 <button data-testid="push-one" onclick={() => pushState('', { modal: 'one' })}>Push one</button>
 <button data-testid="push-two" onclick={() => pushState('', { modal: 'two' })}>Push two</button>
-<button data-testid="replace-current" onclick={() => replaceState(new URL(location.href), { modal: 'replace' })}>Replace current</button>
+<button
+	data-testid="replace-current"
+	onclick={() => replaceState(new URL(location.href), { modal: 'replace' })}>Replace current</button
+>
 <p data-testid="state">{JSON.stringify(page.state)}</p>
 
 <nav aria-label="Native fragment navigation">
