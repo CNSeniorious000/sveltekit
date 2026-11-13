@@ -19,7 +19,7 @@ for (const href of ['about:srcdoc', 'about:blank', 'data:text/html,inline']) {
 			origin: 'null',
 			resolve_url: (/** @type {string | URL} */ value) => new URL(value, 'about:blank'),
 			get_page_key: (/** @type {URL} */ url) => url.href,
-			get_navigation_intent: async () => undefined,
+			get_navigation_intent: () => Promise.resolve(undefined),
 			e: {
 				navigation_external_url() {
 					throw new Error('external');
