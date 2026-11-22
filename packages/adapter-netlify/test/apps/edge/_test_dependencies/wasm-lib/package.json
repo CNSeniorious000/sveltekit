@@ -1,7 +1,0 @@
-{
-	"name": "e2e-test-dep-wasm",
-	"version": "1.0.0",
-	"private": true,
-	"type": "module",
-	"exports": "./index.js"
-}

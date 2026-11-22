@@ -1,5 +1,0 @@
-{
-	"extends": "$app/tsconfig",
-	"include": ["src", "vite.config.js"],
-	"exclude": ["src/service-worker"]
-}

@@ -1,43 +1,51 @@
-[![Chat](https://img.shields.io/discord/457912077277855764?label=chat&logo=discord)](https://svelte.dev/chat)
+# Unhandled streamed rejection during preload
 
-# SvelteKit
+Two-page reproduction using SvelteKit 3.4.0, Svelte 5.59.1, Vite 8.3.8 and
+`@sveltejs/vite-plugin-svelte` 7.3.1.
 
-Web development, streamlined. Read the [documentation](https://svelte.dev/docs/kit) to get started.
+## Reproduce
 
-### Packages
+Use Node 22.17 or newer:
 
-| Package                                                     | Changelog                                             |
-| ----------------------------------------------------------- | ----------------------------------------------------- |
-| [@sveltejs/kit](packages/kit)                               | [Changelog](packages/kit/CHANGELOG.md)                |
-| [@sveltejs/adapter-auto](packages/adapter-auto)             | [Changelog](packages/adapter-auto/CHANGELOG.md)       |
-| [@sveltejs/adapter-cloudflare](packages/adapter-cloudflare) | [Changelog](packages/adapter-cloudflare/CHANGELOG.md) |
-| [@sveltejs/adapter-netlify](packages/adapter-netlify)       | [Changelog](packages/adapter-netlify/CHANGELOG.md)    |
-| [@sveltejs/adapter-node](packages/adapter-node)             | [Changelog](packages/adapter-node/CHANGELOG.md)       |
-| [@sveltejs/adapter-static](packages/adapter-static)         | [Changelog](packages/adapter-static/CHANGELOG.md)     |
-| [@sveltejs/adapter-vercel](packages/adapter-vercel)         | [Changelog](packages/adapter-vercel/CHANGELOG.md)     |
-| [@sveltejs/enhanced-img](packages/enhanced-img)             | [Changelog](packages/enhanced-img/CHANGELOG.md)       |
-| [@sveltejs/package](packages/package)                       | [Changelog](packages/package/CHANGELOG.md)            |
+```sh
+npm install
+npm run dev
+```
 
-[Additional adapters](https://sveltesociety.dev/packages?category=sveltekit-adapters) are maintained by the community.
+Open <http://127.0.0.1:5173> and the browser console. Once Page A says
+"Hover the link before clicking it.", hover **Page B** without clicking.
+The browser reports an unhandled rejection with `message: "Streamed failure"`
+while the URL and page remain unchanged. Click the link: Page B's `{:catch}`
+still displays **Streamed failure**.
 
-## Bug reporting
+Expected: preloading should not produce an unhandled rejection, and the rejected
+data should remain available to the destination's error handler.
 
-Please make sure the issue you're reporting involves SvelteKit. Many issues related to how a project builds originate from [Vite](https://vitejs.dev/), which is used to build a SvelteKit project. You can create a new Vite project with `npm create vite@latest` for client-side only repros and `npm create vite-extra@latest` for SSR or library repros.
+The server attaches a noop catch to its rejected promise. `hooks.server.js`
+preserves the synthetic error message in dev and preview. There are no mocked
+responses or artificial delays.
 
-If an issue originates from Vite, please report it in the [Vite issue tracker](https://github.com/vitejs/vite/issues).
+## Verify in Chromium
 
-## Contributing
+With the dev server running, use another terminal:
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for information on how to develop SvelteKit locally.
+```sh
+npx playwright install chromium
+npm run verify
+```
 
-## Supporting Svelte
+The script checks that the rejection occurs before leaving A, then that clicking
+the link renders the same error and reuses the single preloaded data request.
+It also verifies that the page later handles the original rejected promise.
 
-Svelte is an MIT-licensed open source project with its ongoing development made possible entirely by fantastic volunteers. If you'd like to support their efforts, please consider:
+For preview, stop the dev server, build and start preview:
 
-- [Becoming a backer on Open Collective](https://opencollective.com/svelte).
+```sh
+npm run build
+npm run preview
+```
 
-Funds donated via Open Collective will be used for compensating expenses related to Svelte's development such as hosting costs. If sufficient donations are received, funds may also be used to support Svelte's development more directly.
-
-## License
-
-[MIT](https://github.com/sveltejs/kit/blob/main/LICENSE)
+Then run `BASE_URL=http://127.0.0.1:4173 npm run verify` in another terminal.
+After applying the client fix externally, use `EXPECT_UNHANDLED=0 npm run verify`
+(or set both environment variables for preview). Rebuild before testing a patch
+in preview.

@@ -1,39 +1,19 @@
 {
-	"name": "kit-monorepo",
-	"version": "0.0.1",
-	"description": "monorepo for @sveltejs/kit and friends",
-	"private": true,
-	"type": "module",
-	"scripts": {
-		"test:kit": "pnpm run --dir packages/kit test",
-		"test:kit:unit": "cd packages/kit && vitest run -c vitest.kit.config.js",
-		"test:kit:dev": "pnpm run --dir packages/kit test:dev",
-		"test:kit:build": "pnpm run --dir packages/kit test:build",
-		"test:vite-ecosystem-ci": "pnpm --dir packages/kit test",
-		"test:others": "pnpm -F @sveltejs/kit prepublishOnly && pnpm -r --filter='./packages/*' --filter=!./packages/kit/ test",
-		"test:others:unit": "pnpm -F @sveltejs/kit prepublishOnly && pnpm -r --filter=\"./packages/*\" --filter=\"!./packages/kit\" --workspace-concurrency=1 test:unit",
-		"test:unit": "vitest run",
-		"check": "pnpm --filter='./packages/**' prepublishOnly && pnpm --filter='./packages/**' --filter='!./packages/kit/test/build-errors/**' check",
-		"lint": "oxfmt --check . && echo '\nRunning eslint...' && eslint --cache --cache-location node_modules/.eslintcache 'packages/**/*.{js,d.ts}'",
-		"format": "oxfmt --write .",
-		"precommit": "pnpm format && pnpm lint",
-		"changeset:version": "changeset version && pnpm -r generate:version && git add --all",
-		"changeset:release": "changeset publish",
-		"sync-all": "node scripts/sync-all.js"
-	},
-	"devDependencies": {
-		"@changesets/changelog-github": "catalog:",
-		"@changesets/cli": "catalog:",
-		"@playwright/test": "catalog:",
-		"@sveltejs/eslint-config": "catalog:",
-		"@types/node": "catalog:",
-		"eslint": "catalog:",
-		"oxfmt": "^0.79.0",
-		"vite": "catalog:",
-		"vitest": "catalog:"
-	},
-	"packageManager": "pnpm@12.21.0+sha512.66fd8278ee28935ce951792d34367ff3af5c432a2756445823029533835b8da529bbe0be5130afd56ed0713fb8789e47bad82d93bd5ae2fe54b15562d6276ef0",
-	"engines": {
-		"pnpm": ">=11.0.0"
-	}
+  "name": "sveltekit-preloaded-stream-rejection",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.17" },
+  "scripts": {
+    "dev": "vite dev --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "verify": "node verify.mjs"
+  },
+  "devDependencies": {
+    "@sveltejs/kit": "3.4.0",
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "playwright": "1.65.1",
+    "svelte": "5.59.1",
+    "vite": "8.3.8"
+  }
 }
